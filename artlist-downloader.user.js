@@ -5,7 +5,7 @@
 // @author      Mia @ github.com/xNasuni
 // @match       *://*.artlist.io/*
 // @grant       none
-// @version     1
+// @version     1.1
 // @updateURL   https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @downloadURL https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @supportURL  https://github.com/xNasuni/artlist-downloader/issues
@@ -43,16 +43,11 @@ async function HandleArtifact(URL) {
             const BlobData = new Blob([URL], { type: 'audio/aac' })
             const Handle = await window.showSaveFilePicker({ suggestedName: (await GetRedirectedUrl(URL)).split('/')[6], types: [{description: "AAC File (Compressed MP3)", accept: { "audio/aac": [".aac"]}}] })
             const Writable = await Handle.createWritable()
-            await Writable.write(BlobData);
-            await Writable.close();
+            await Writable.write(BlobData)
+            await Writable.close()
         } catch (Err) {
-            console.error(Err);
-            var Element = document.createElement('a')
-            Element.href = URL
-            Element.download = URL
-            document.body.appendChild(Element)
-            Element.click()
-            Element.remove()
+            console.error(Err)
+            window.open(URL, '_blank')
         }
     }
 }
