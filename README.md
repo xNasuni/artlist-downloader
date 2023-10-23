@@ -1,8 +1,8 @@
 # artlist-downloader
 
-This downloads **music** and **sound effects** from the artlist, make sure that you are playing the song you want to download before **executing** the script in the console.
+This downloads **music** and **sound effects** from the artlist. When you start playing music or sfx the userscript will prompt you if you want to save it or not.
 
-> This script gets the audio **URI** the site is playing and downloads it from an anchor element and downloads it with the default file name.
+# [`INSTALL USERSCRIPT`](https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js)
 
 ## Extra Information
 
