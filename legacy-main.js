@@ -1,3 +1,5 @@
+// this code no longer works but feel free to look at it
+
 (async function() {
     function DownloadURI(URI) {
         var Element = document.createElement('a')
