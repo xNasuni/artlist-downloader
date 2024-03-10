@@ -5,7 +5,7 @@
 // @author      Mia @ github.com/xNasuni
 // @match       *://*.artlist.io/*
 // @grant       none
-// @version     1.3
+// @version     1.4
 // @require https://cdn.jsdelivr.net/npm/notiflix@3.2.6/dist/notiflix-aio-3.2.6.min.js
 // @updateURL   https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @downloadURL https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
@@ -19,6 +19,11 @@ XMLHttpRequest.prototype.open = function (method, url) {
         const filename = atob(url.substring(('https://cms-public-artifacts.artlist.io/').length))
         Notiflix.Notify.success(filename, async () => {
             const link = 'https://cms-public-artifacts.artlist.io/' + filename
+
+            if (window.showSaveFilePicker == undefined) { // some compatability idk for me ShowSaveFilePicker didnt exist for some raeson so
+                location.href = link;
+                return;
+            }
             
             let blobDataFromURL = await fetch(link).then(r => r.blob());
             
