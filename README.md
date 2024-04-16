@@ -1,6 +1,6 @@
 # artlist-downloader
 
-## This is NOT allowed for commerical use or for use in YouTube videos without the proper licensing, use this at your own risk. <br><br>🛑 You have been warned 🛑
+## This is NOT allowed for commerical use or for use in YouTube videos [without the proper licensing](https://artlist.io/page/pricing/music-and-sfx), use this at your own risk. <br><br>🛑 You have been warned 🛑
 
 #### If you dont want to be held responsible for pirating music, buy an artlist.io license at [their plans and pricing page](https://artlist.io/page/pricing/music-and-sfx)
 #### Make sure to read [their terms of service](https://artlist.io/help-center/privacy-terms/terms-of-use/) also.
