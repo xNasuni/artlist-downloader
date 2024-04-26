@@ -5,7 +5,7 @@
 // @author      Mia @ github.com/xNasuni
 // @match       *://*.artlist.io/*
 // @grant       none
-// @version     1.5
+// @version     1.6
 // @updateURL   https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @downloadURL https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @supportURL  https://github.com/xNasuni/artlist-downloader/issues
@@ -131,7 +131,7 @@ function handleMatch(xhr) {
         return (
           document.getElementsByClassName(
             "MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeMedium w-6 text-base text-white"
-          ).length >= 2
+          ).length >= 1
         );
       });
 
@@ -160,6 +160,24 @@ function handleMatch(xhr) {
           sitePlayableFilePath,
         } = song;
 
+        if (document.getElementsByClassName("text-white rounded-full border flex w-9 h-9").length >= 1) {
+          for (const roundedButton of document.getElementsByClassName("text-white rounded-full border flex w-9 h-9")) 			{
+            if (roundedButton.getAttribute("aria-label") == "direct download") {
+              var details = {
+                title: roundedButton.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.children[0].children[2].children[0].children[0].children[0],
+                author: roundedButton.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.children[0].children[2].children[0].children[1].children[0].children[0]
+              }
+              
+              if (artistName.toLowerCase().includes(details.author.innerText) && songName.toLowerCase().includes(details.title.innerText)) {
+                handleButton(roundedButton, artistName, songName, sitePlayableFilePath, 
+          `${
+            pageIsSFX ? "SFX" : "MUSIC"
+          } ${artistName} - ${songName} (${artistId}.${albumId}.${songId})`)
+              }
+            }
+          }
+        }
+        
         await until(() => { const typ = typeof(GetDownloadElementFromDetails(songName, artistName)) ;console.debug(typ); return typ != "number"})
         
         const button = GetDownloadElementFromDetails(songName, artistName);
