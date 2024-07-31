@@ -1,263 +1,311 @@
 // ==UserScript==
-// @name        Artlist DL
+// @name        Artlist DL Rewrite
 // @namespace   http://tampermonkey.net/
 // @description Allows you to download artlist.io Music & SFX
 // @author      Mia @ github.com/xNasuni
 // @match       *://*.artlist.io/*
 // @grant       none
-// @version     1.6
+// @version     2
+// @run-at		document-start
 // @updateURL   https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @downloadURL https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @supportURL  https://github.com/xNasuni/artlist-downloader/issues
 // ==/UserScript==
 
-const readyButtonColor = "#aaff55";
-registered = {}; // {`${artistName},${songName}`: <function>}}
-pageIsSFX = location.pathname.includes("sfx");
+const LoadedSongLists = []
+const LoadedSfxLists = []
+const ModifiedMusicButtonColor = "#82ff59"
+const ModifiedSfxButtonColor = "#ff90bf"
+const ErrorButtonColor = "#ff3333"
+const MUSIC_DATATYPE = "_music"
+const SFX_DATATYPE = "_sfx"
 
-function until(testFunc) {
-  // https://stackoverflow.com/a/52657929
-  const poll = (resolve) => {
-    if (testFunc()) {
-      resolve();
-    } else setTimeout((_) => poll(resolve), 800);
-  };
-
-  return new Promise(poll);
-}
-
-function GetDownloadElementFromDetails(Title, Author) {
-  // this shouldn't break, atleast for like a couple site updates...
-  const Authors = document.getElementsByClassName(
-    "truncate whitespace-pre font-normal"
-  );
-  var SongDatas = [];
-  for (var AuthorEl of Authors) {
-    if (
-      AuthorEl.innerText.toLowerCase().includes(Author.toLowerCase()) &&
-      !AuthorEl.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.className.includes(
-        "sticky bottom-0 z-50 mt-25 w-full bg-primary py-5" // really unreadable code
-      )
-    ) {
-      SongDatas.push({
-        author: AuthorEl,
-        title:
-          AuthorEl.parentNode.parentNode.parentNode.parentNode.children[0]
-            .children[0].children[0].children[0],
-        button:
-          AuthorEl.parentNode.parentNode.parentNode.parentNode.parentNode
-            .parentNode.parentNode.children[2].children[0].children[
-            window.pageIsSFX ? 2 : 4
-          ].children[0].children[0].children[0],
-      }); // MOST unreadable code
-    }
-  }
-  if (SongDatas.length <= 0) {
-    return 0x1;
-  }
-
-  var TargetSongData = null;
-  for (var songData of SongDatas) {
-    if (songData.title.innerText.toLowerCase().includes(Title.toLowerCase())) {
-      TargetSongData = songData;
-    }
-  }
-
-  if (TargetSongData == null) {
-    return 0x2;
-  }
-
-  var ButtonElement = null;
-  if (
-    TargetSongData.title.innerText.toLowerCase().includes(Title.toLowerCase())
-  ) {
-    ButtonElement = TargetSongData.button;
-  }
-
-  if (ButtonElement == null) {
-    return 0x3;
-  }
-  return ButtonElement;
-}
+var AudioTable
+var TBody
+var LastChangeObserver
+var LastInterval = -1
+var LastPath = location.pathname
 
 async function ShowSaveFilePickerForURL(url, filename) {
-  if (window.showSaveFilePicker == undefined) {
-    // show save file picker might not always exist for compatability.
-    location.href = url;
-    return;
-  }
+	if (window.showSaveFilePicker == undefined) {
+		// show save file picker might not always exist for compatability.
+		location.href = url;
+		return;
+	}
 
-  let blobDataFromURL = await fetch(url).then((r) => r.blob());
+	let blobDataFromURL = await fetch(url).then((r) => r.blob());
 
-  const BlobData = new Blob([blobDataFromURL], { type: "audio/aac" });
-  const Handle = await window.showSaveFilePicker({
-    suggestedName: filename,
-    types: [
-      {
-        description: "AAC File (Compressed MP3)",
-        accept: { "audio/aac": [".aac"] },
-      },
-    ],
-  });
-  const Writable = await Handle.createWritable();
-  await Writable.write(BlobData);
-  await Writable.close();
+	const BlobData = new Blob([blobDataFromURL], { type: "audio/aac" });
+	const Handle = await window.showSaveFilePicker({
+		suggestedName: filename,
+		types: [
+			{
+				description: "AAC File (Compressed MP3)",
+				accept: { "audio/aac": [".aac"] },
+			},
+		],
+	});
+	const Writable = await Handle.createWritable();
+	await Writable.write(BlobData);
+	await Writable.close();
 }
 
-function handleButton(button, artistName, songName, url, filename) {
-  try {
-    button.style.color = readyButtonColor;
-    function handler(event) {
-      try {
-        event.stopImmediatePropagation(); // prevent any other click calls getting to the premium popup upsell
-      } catch (e) {}
-      ShowSaveFilePickerForURL(url, filename + ".aac");
-    }
-    button.addEventListener("click", handler, true);
-    registered[artistName + "," + songName] = handler;
-  } catch (e) {} // might not be initialized, but it's better if 1 button errors and its catched
-  ///////////////// rather than 1 error making all buttons not work, does that logic make sense?
+function MatchURL(Url) {
+	var URLObject
+	try {
+		URLObject = new URL(Url)
+	} catch (e) {
+		return false
+	}
+	if (URLObject.host == "search-api.artlist.io" && (URLObject.pathname == "/v1/graphql" || URLObject.pathname == "/v2/graphql")) {
+		return true
+	}
+	return false
 }
 
-function handleMatch(xhr) {
-  async function onstatechange() {
-    console.debug(xhr.readyState, xhr.status, xhr)
-    if (xhr.readyState == 4 && xhr.status == 200) {
-      // when the request is done, we wait for buttons to be loaded because
-      // if this is the first time loading, buttons likely wont be loaded
-      // as there wouldn't have been anything to display yet, which is
-      // the sole reason that the website makes this call. <--- yap
-      await until(() => {
-        return (
-          document.getElementsByClassName(
-            "MuiButtonBase-root MuiIconButton-root MuiIconButton-sizeMedium w-6 text-base text-white"
-          ).length >= 1
-        );
-      });
-
-      const responseText = xhr.responseText;
-      const jsonData = JSON.parse(responseText);
-
-      if (jsonData.data.sfxList != null) {
-        pageIsSFX = true;
-      }
-      if (jsonData.data.songList != null) {
-        pageIsSFX = false;
-      }
-
-      console.debug((jsonData.data.songList || jsonData.data.sfxList))
-      const songs = (jsonData.data.songList || jsonData.data.sfxList).songs; // get the music or sfx as iterable json
-
-      for (const song of songs) {
-        const {
-          albumId,
-          artistId,
-          songId,
-          //   duration,
-          artistName,
-          //   albumName,
-          songName,
-          sitePlayableFilePath,
-        } = song;
-
-        if (document.getElementsByClassName("text-white rounded-full border flex w-9 h-9").length >= 1) {
-          for (const roundedButton of document.getElementsByClassName("text-white rounded-full border flex w-9 h-9")) 			{
-            if (roundedButton.getAttribute("aria-label") == "direct download") {
-              var details = {
-                title: roundedButton.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.children[0].children[2].children[0].children[0].children[0],
-                author: roundedButton.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.parentNode.children[0].children[2].children[0].children[1].children[0].children[0]
-              }
-              
-              if (artistName.toLowerCase().includes(details.author.innerText) && songName.toLowerCase().includes(details.title.innerText)) {
-                handleButton(roundedButton, artistName, songName, sitePlayableFilePath, 
-          `${
-            pageIsSFX ? "SFX" : "MUSIC"
-          } ${artistName} - ${songName} (${artistId}.${albumId}.${songId})`)
-              }
-            }
-          }
-        }
-        
-        await until(() => { const typ = typeof(GetDownloadElementFromDetails(songName, artistName)) ;console.debug(typ); return typ != "number"})
-        
-        const button = GetDownloadElementFromDetails(songName, artistName);
-        console.debug(`got button`, button)
-        if (button == 0x2) {
-          
-        }
-        handleButton(
-          button,
-          artistName,
-          songName,
-          sitePlayableFilePath,
-          `${
-            pageIsSFX ? "SFX" : "MUSIC"
-          } ${artistName} - ${songName} (${artistId}.${albumId}.${songId})`
-        ); // handle the button we got from the function
-      }
-    }
-  }
-  xhr.addEventListener("readystatechange", onstatechange);
-  if (xhr.readyState == 4) {
-    onstatechange();
-  }
+function AreWeOnSFXPage() {
+	if (window.location.host == "artlist.io" && window.location.pathname == "/sfx") {
+		return true
+	}
+	return false
 }
 
-window.XMLHttpRequestOriginalOpen = XMLHttpRequest.prototype.open;
-XMLHttpRequest.prototype.open = function (method, url) {
-  try {
-    const ParsedURL = new URL(url);
-    if (ParsedURL.host == "search-api.artlist.io") {
-      // this is the url where it returns the song datas
-      handleMatch(this); // `this` is equal to the xhr instance since we are in the scope of a prototype
-    }
-  } catch (e) {} // new URL(...) can error if XMLHttpRequest was created with diff args
+function GetDatatype(Data) {
+	var Datatype = 'unknown'
 
-  window.XMLHttpRequestOriginalOpen.apply(this, arguments);
-};
+	try {
+		if (Data.data.sfxList != undefined && Data.data.sfxList.songs != undefined) {
+			Datatype = SFX_DATATYPE
+		}
+	} catch (e) { }
+	try {
+		if (Data.data.songList != undefined && Data.data.songList.songs != undefined) {
+			Datatype = MUSIC_DATATYPE
+		}
+	} catch (e) { }
 
-async function makeNowPlayingButtonDoThings() {
-  await until(() => {
-    return (
-      document.getElementsByClassName(
-        "flex w-6 items-center justify-center text-white hover:text-accent"
-      ).length >= 1
-    );
-  });
-
-  const mainButton = document.getElementsByClassName(
-    "flex w-6 items-center justify-center text-white hover:text-accent"
-  )[0];
-  mainButton.style.color = readyButtonColor;
-  mainButton.addEventListener(
-    "click",
-    (event) => {
-      event.stopImmediatePropagation(); // prevent any other click calls getting to the premium popup upsell
-
-      const holderOfThings =
-        mainButton.parentNode.parentNode.parentNode.parentNode.parentNode
-          .parentNode.parentNode.children[0].children[1].children[1]
-          .children[0];
-
-      const title =
-        holderOfThings.children[0].children[0].children[0].children[0]
-          .innerText;
-      const author =
-        holderOfThings.children[1].children[0].children[0].children[0]
-          .innerText;
-
-      const thisHandler = registered[`${author},${title}`];
-
-      if (thisHandler != null) {
-        thisHandler();
-      } else {
-        // this if statement should never get here
-        alert(
-          `Please report any errors in the Dev-Tools to https://github.com/xNasuni/artlist-downloader, and also show this:\n[${author},${title}] === null, #$ = ${registered.length}`
-        );
-      }
-    },
-    true
-  );
+	return Datatype
 }
-makeNowPlayingButtonDoThings(); // yeah im not the best at coding
+
+function GetAudioTable() {
+	const TableElements = window.document.querySelectorAll(".w-full .table-fixed")
+	for (const Element of TableElements) {
+		if (Element.getAttribute('data-testid') == "AudioTable") {
+			return Element
+		}
+	}
+}
+
+function GetTBody(AudioTable) {
+	var TBody = undefined
+	for (const Child of AudioTable.childNodes) {
+		if (Child.nodeName === "TBODY") {
+			TBody = Child
+			break
+		}
+	}
+	return TBody
+}
+
+function GetAudioRowData(AudioRow, Datatype) {
+	var Data = { SongTitle: "none", Artists: [], Button: "none", Datatype: Datatype }
+	for (const Child of AudioRow.childNodes) {
+		if (Child.getAttribute("data-testid") == "AlbumsAndArtists") {
+			try { // still using this method, because I couldn't find any other way to get the album title through just straight up HTML.
+				Data.SongTitle = Child.childNodes[0].childNodes[2].childNodes[0].childNodes[0].childNodes[0].childNodes[0].textContent
+			} catch (e) { console.warn("SongTitle: ", Child, e) }
+			try { // still using this method, because I couldn't find any other way to get the album title through just straight up HTML.
+				const ArtistsContainer = Child.childNodes[0].childNodes[2].childNodes[1].childNodes[0].childNodes[0].childNodes
+				for (const Artist of ArtistsContainer) {
+					Data.Artists.push(Artist.textContent.trim().replaceAll(",", ""))
+				}
+			} catch (e) { console.warn("ArtistsContainer: ", e) }
+		}
+		if (Child.getAttribute("data-testid") == "DataAndActions" && Datatype == MUSIC_DATATYPE) {
+			try { // still using this method, because I couldn't find any other way to get the album title through just straight up HTML.
+				Data.Button = Child.childNodes[0].childNodes[4].childNodes[0].childNodes[0].childNodes[0]
+			} catch (e) { console.warn("Button: ", Child, e) }
+		}
+		if (Child.getAttribute("data-testid") == "DataAndActions" && Datatype == SFX_DATATYPE) {
+			try { // still using this method, because I couldn't find any other way to get the album title through just straight up HTML.
+				Data.Button = Child.childNodes[0].childNodes[2].childNodes[0].childNodes[0].childNodes[0]
+			} catch (e) { console.warn("Button: ", Child, e) }
+		}
+	}
+
+	if (Data.SongTitle == "none" && Data.Artists.length == 0 && Data.Button == "none") {
+		// throw new ReferenceError("audio row doesn't have any data")
+		return false
+	}
+	if ((Data.SongTitle == "none" || Data.Artists.length == 0) && Data.Button != "none") {
+		Data.Button.style.color = ErrorButtonColor
+	}
+
+	return Data
+}
+
+function MakeFilename(AssetData, Datatype) {
+	return `${Datatype == MUSIC_DATATYPE ? "Music" : "Sfx"} ${AssetData.artistName} - ${AssetData.songName} ${AssetData.songName != AssetData.albumName ? `on ${AssetData.albumName}` : ''} (${AssetData.artistId}.${AssetData.albumId}.${AssetData.songId})`
+}
+
+function WriteAudio(RowData, AudioData) {
+	const Datatype = RowData.Datatype
+	const FileName = MakeFilename(AudioData, Datatype)
+	RowData.Button.setAttribute("artlist-dl", "modified")
+	RowData.Button.style.color = Datatype == MUSIC_DATATYPE ? ModifiedMusicButtonColor : ModifiedSfxButtonColor
+	RowData.Button.addEventListener("click", function(event) {
+		event.stopImmediatePropagation() // prevent premium popup upsell
+		ShowSaveFilePickerForURL(AudioData.sitePlayableFilePath, FileName + ".aac");
+	}, true)
+}
+
+function MatchAudioToRow(AudioData, RowData) {
+	return AudioData.songName === RowData.SongTitle && RowData.Artists.indexOf(AudioData.artistName) != -1
+}
+
+function OnRowAdded(AudioRow, RowData, AudioData) {
+	AudioRow.setAttribute("artlist-dl-state", "modified")
+	if (AudioData !== undefined ){
+		WriteAudio(RowData, AudioData)
+	} else {
+		console.warn("No data given for row", RowData)
+		if (RowData.Button !== "none") {
+			RowData.Button.style.color = ErrorButtonColor
+		}
+	}
+}
+
+function GetAudioDataFromRowData(RowData) {
+	if (RowData.Datatype == SFX_DATATYPE) {
+		if (LoadedSfxLists.length <= 0) { console.warn("No loaded sound effects to loop through."); return }
+		for (const SfxList of LoadedSfxLists) {
+			for (const SfxData of SfxList) {
+				if (MatchAudioToRow(SfxData, RowData)) {
+					return SfxData
+				}
+			}
+		}
+	}
+	if (RowData.Datatype == MUSIC_DATATYPE) {
+		if (LoadedSongLists.length <= 0) { console.warn("No loaded songs to loop through."); return }
+		for (const SongList of LoadedSongLists) {
+			for (const SongData of SongList) {
+				if (MatchAudioToRow(SongData, RowData)) {
+					return SongData
+				}
+			}
+		}
+	}
+}
+
+function ApplyXHR(XHR) {
+	XHR.addEventListener("readystatechange", function () {
+		if (XHR.readyState == XMLHttpRequest.DONE) {
+			var JSONData
+			try {
+				JSONData = JSON.parse(XHR.responseText)
+			} catch (e) {
+				console.warn(`Couldn't parse ${XHR.responseText}`)
+				return
+			}
+			HandleJSONData(JSONData)
+		}
+	})
+}
+
+function HandleJSONData(Data) {
+	const Datatype = GetDatatype(Data)
+	if (Datatype == MUSIC_DATATYPE) {
+		LoadedSongLists.push(Data.data.songList.songs)
+		return
+	}
+	if (Datatype == SFX_DATATYPE) {
+		LoadedSfxLists.push(Data.data.sfxList.songs)
+		return
+	}
+}
+
+const oldXMLHttpRequestOpen = window.XMLHttpRequest.prototype.open
+window.XMLHttpRequest.prototype.open = function () {
+	const Method = (arguments)[0]
+	const URL = (arguments)[1]
+
+	if (MatchURL(URL)) {
+		ApplyXHR(this)
+	}
+
+	return oldXMLHttpRequestOpen.apply(this, arguments)
+}
+
+// this makes the user-script support the [←] Back and [→] Right navigations
+// aswell as switching pages because artlist doesn't navigate, but instead
+// changes their HTML dynamically so that the end-user does not have to
+// reload the entire page.
+
+// by polling the changes in an albeit bad way, we can detect when this
+// occurs, and as far as i know there's no other better way to do it.
+// please make an issue on github and educate me if there is.
+function Initialize() {
+	LastPath = location.pathname
+
+	AudioTable = GetAudioTable()
+	while (AudioTable === undefined) {
+		AudioTable = GetAudioTable()
+		if (AudioTable != undefined) {
+			break
+		}
+	}
+
+	TBody = GetTBody(AudioTable)
+	while (TBody === undefined) {
+		TBody = GetTBody(AudioTable)
+		if (TBody != undefined) {
+			break
+		}
+	}
+
+	function OnAudioRowAdded(AudioRow) {
+		if (AudioRow.getAttribute("artlist-dl-state") === "modified") { return }
+		if (AudioRow.classList <= 0 || AudioRow.classList.contains("hidden")) { return }
+		const RowData = GetAudioRowData(AudioRow, AreWeOnSFXPage() ? SFX_DATATYPE : MUSIC_DATATYPE)
+		const AudioData = GetAudioDataFromRowData(RowData)
+		
+		OnRowAdded(AudioRow, RowData, AudioData)
+	}
+
+	LastChangeObserver = new MutationObserver(function(MutationList, _Observer) {
+		for (const Mutation of MutationList) {
+			if (Mutation.type === "childList" && Mutation.target == TBody) {
+				for (const AudioRow of Mutation.addedNodes) {
+					OnAudioRowAdded(AudioRow)
+				}
+			}
+		}
+	})
+
+	LastChangeObserver.observe(TBody, {
+		attributes: false,
+		childList: true,
+		subtree: true,
+	})
+
+	for (const AudioRow of TBody.childNodes) {
+		OnAudioRowAdded(AudioRow)
+	}
+}
+document.addEventListener("DOMContentLoaded", (event) => {
+	Initialize()
+	LastInterval = setInterval(() => {
+		const NowPath = location.pathname
+		if (LastPath != NowPath) {
+			if (!document.contains(TBody)) {
+				TBody = null
+				AudioTable = null
+				LastChangeObserver.disconnect()
+				Initialize()
+			}
+			return
+		}
+		LastPath = NowPath
+	})
+})
