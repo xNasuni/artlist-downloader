@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name        Artlist DL Rewrite
+// @name        Artlist DL
 // @namespace   http://tampermonkey.net/
 // @description Allows you to download artlist.io Music & SFX
 // @author      Mia @ github.com/xNasuni
 // @match       *://*.artlist.io/*
 // @grant       none
-// @version     2
+// @version     2.1
 // @run-at		document-start
 // @updateURL   https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @downloadURL https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
@@ -245,24 +245,29 @@ window.XMLHttpRequest.prototype.open = function () {
 // by polling the changes in an albeit bad way, we can detect when this
 // occurs, and as far as i know there's no other better way to do it.
 // please make an issue on github and educate me if there is.
-function Initialize() {
+
+function Until(testFunc) {
+	// https://stackoverflow.com/a/52657929
+	const poll = (resolve) => {
+	  if (testFunc()) {
+		resolve();
+	  } else setTimeout((_) => poll(resolve), 800);
+	};
+	return new Promise(poll)
+}
+
+async function Initialize() {
 	LastPath = location.pathname
 
+	await Until(() => {
+		return GetAudioTable() != undefined
+	})
 	AudioTable = GetAudioTable()
-	while (AudioTable === undefined) {
-		AudioTable = GetAudioTable()
-		if (AudioTable != undefined) {
-			break
-		}
-	}
 
+	await Until(() => {
+		return GetTBody(AudioTable) != undefined
+	})
 	TBody = GetTBody(AudioTable)
-	while (TBody === undefined) {
-		TBody = GetTBody(AudioTable)
-		if (TBody != undefined) {
-			break
-		}
-	}
 
 	function OnAudioRowAdded(AudioRow) {
 		if (AudioRow.getAttribute("artlist-dl-state") === "modified") { return }
