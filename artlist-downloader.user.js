@@ -5,26 +5,39 @@
 // @author      Mia @ github.com/xNasuni
 // @match       *://*.artlist.io/*
 // @grant       none
-// @version     2.1
-// @run-at		document-start
+// @version     2.2
+// @run-at	    document-start
 // @updateURL   https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @downloadURL https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @supportURL  https://github.com/xNasuni/artlist-downloader/issues
 // ==/UserScript==
 
-const LoadedSongLists = []
+const LoadedMusicLists = []
 const LoadedSfxLists = []
+const LoadedSfxsList = []
+const LoadedSongsList = []
 const ModifiedMusicButtonColor = "#82ff59"
 const ModifiedSfxButtonColor = "#ff90bf"
 const ErrorButtonColor = "#ff3333"
-const MUSIC_DATATYPE = "_music"
-const SFX_DATATYPE = "_sfx"
+const UNKNOWN_DATATYPE = "_unknown"
+const SINGLE_SOUND_EFFECT_DATATYPE = "_ssfx"
+const SINGLE_SONG_DATATYPE = "_ssong"
+const SONGS_PAGETYPE = "_songs"
+const MUSIC_PAGETYPE = "_music"
+const SFXS_PAGETYPE = "_sfxs"
+const SFX_PAGETYPE = "_sfx"
+const oldXMLHttpRequestOpen = window.XMLHttpRequest.prototype.open
 
 var AudioTable
 var TBody
 var LastChangeObserver
+var ActionContainer
+var SongPage
 var LastInterval = -1
-var LastPath = location.pathname
+var RequestsInterval = -1
+var DontPoll = false
+var SingleSoundEffectData = "none"
+var SingleSongData = "none"
 
 async function ShowSaveFilePickerForURL(url, filename) {
 	if (window.showSaveFilePicker == undefined) {
@@ -35,65 +48,202 @@ async function ShowSaveFilePickerForURL(url, filename) {
 
 	let blobDataFromURL = await fetch(url).then((r) => r.blob());
 
-	const BlobData = new Blob([blobDataFromURL], { type: "audio/aac" });
-	const Handle = await window.showSaveFilePicker({
-		suggestedName: filename,
-		types: [
-			{
-				description: "AAC File (Compressed MP3)",
-				accept: { "audio/aac": [".aac"] },
-			},
-		],
-	});
-	const Writable = await Handle.createWritable();
-	await Writable.write(BlobData);
-	await Writable.close();
-}
-
-function MatchURL(Url) {
-	var URLObject
 	try {
-		URLObject = new URL(Url)
-	} catch (e) {
-		return false
-	}
-	if (URLObject.host == "search-api.artlist.io" && (URLObject.pathname == "/v1/graphql" || URLObject.pathname == "/v2/graphql")) {
-		return true
-	}
-	return false
+		const BlobData = new Blob([blobDataFromURL], { type: "audio/aac" });
+		const Handle = await window.showSaveFilePicker({
+			suggestedName: filename,
+			types: [
+				{
+					description: "AAC File (Compressed MP3)",
+					accept: { "audio/aac": [".aac"] },
+				},
+			],
+		});
+		const Writable = await Handle.createWritable();
+		await Writable.write(BlobData);
+		await Writable.close();
+	} catch (e) { }
 }
 
-function AreWeOnSFXPage() {
-	if (window.location.host == "artlist.io" && window.location.pathname == "/sfx") {
-		return true
+function Until(testFunc) {
+	// https://stackoverflow.com/a/52657929
+	const poll = (resolve) => {
+		if (DontPoll) { resolve() }
+		if (testFunc()) {
+			resolve();
+		} else setTimeout((_) => poll(resolve), 100);
+	};
+	return new Promise(poll)
+}
+
+function GetPagetype() {
+	const PathSplit = window.location.pathname.split('/')
+	if (window.location.host === "artlist.io" && (PathSplit[1] === "royalty-free-music" && (PathSplit[2] === "song" || PathSplit[2] === "artist"))) {
+		return SONGS_PAGETYPE
 	}
-	return false
+	if (window.location.host === "artlist.io" && (PathSplit[1] === "royalty-free-music")) {
+		return MUSIC_PAGETYPE
+	}
+	if (window.location.host === "artlist.io" && (PathSplit[1] === "sfx" && PathSplit[2] === "track")) {
+		return SFXS_PAGETYPE
+	}
+	if (window.location.host == "artlist.io" && (PathSplit[1] === "sfx" || (PathSplit[1] === "sfx" && (PathSplit[2] === "search" || PathSplit[2] === "pack")))) {
+		return SFX_PAGETYPE
+	}
+	return UNKNOWN_DATATYPE
 }
 
 function GetDatatype(Data) {
-	var Datatype = 'unknown'
+	var Datatype = UNKNOWN_DATATYPE
 
 	try {
 		if (Data.data.sfxList != undefined && Data.data.sfxList.songs != undefined) {
-			Datatype = SFX_DATATYPE
+			Datatype = SFX_PAGETYPE
 		}
 	} catch (e) { }
 	try {
 		if (Data.data.songList != undefined && Data.data.songList.songs != undefined) {
-			Datatype = MUSIC_DATATYPE
+			Datatype = MUSIC_PAGETYPE
+		}
+	} catch (e) { }
+	try {
+		if (Data.data.sfxs != undefined && Data.data.sfxs.length === 1 && Data.data.sfxs[0].similarList != undefined) {
+			Datatype = SFXS_PAGETYPE
+		}
+	} catch (e) { }
+	try {
+		if (Data.data.sfxs != undefined && Data.data.sfxs.length === 1 && Data.data.sfxs[0].songName != undefined) {
+			Datatype = SINGLE_SOUND_EFFECT_DATATYPE
+		}
+	} catch (e) { }
+	try {
+		if (Data.data.songs != undefined && Data.data.songs.length === 1 && Data.data.songs[0].songName != undefined) {
+			Datatype = SINGLE_SONG_DATATYPE
+		}
+	} catch (e) { }
+	try {
+		if (Data.data.songs != undefined && Data.data.songs.length === 1 && Data.data.songs[0].similarSongs != undefined) {
+			Datatype = SONGS_PAGETYPE
 		}
 	} catch (e) { }
 
 	return Datatype
 }
 
-function GetAudioTable() {
-	const TableElements = window.document.querySelectorAll(".w-full .table-fixed")
-	for (const Element of TableElements) {
-		if (Element.getAttribute('data-testid') == "AudioTable") {
-			return Element
-		}
+function MatchURL(Url) {
+	const Pagetype = GetPagetype()
+	var URLObject
+	try {
+		URLObject = new URL(Url)
+	} catch (e) {
+		return false
 	}
+	if ((Pagetype === MUSIC_PAGETYPE || Pagetype === SFX_PAGETYPE || Pagetype === SONGS_PAGETYPE || Pagetype === SFXS_PAGETYPE) && URLObject.host === "search-api.artlist.io" && (URLObject.pathname == "/v1/graphql" || URLObject.pathname == "/v2/graphql")) {
+		return true
+	}
+	return false
+}
+
+async function GetSfxInfo(Id) {
+	const Query = `query Sfxs($ids: [Int!]!) {
+  sfxs(ids: $ids) {
+    songId
+    songName
+    artistId
+    artistName
+    albumId
+    albumName
+    assetTypeId
+    duration
+    sitePlayableFilePath
+  }
+}
+`
+	const Variables = {ids: [Id]}
+
+	const Payload = {query: Query, variables: Variables}
+
+	const Response = await fetch("https://search-api.artlist.io/v1/graphql", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(Payload)})
+	const JSONData = await Response.json()
+
+	var Data
+
+	try {
+		Data = JSONData.data.sfxs[0]
+	} catch (e) { }
+
+	if (Data === undefined) {
+		return false
+	}
+
+	return Data
+}
+
+async function GetSongInfo(Id) {
+	const Query = `query Songs($ids: [String!]!) {
+  songs(ids: $ids) {
+    songId
+    songName
+    artistId
+    artistName
+    albumId
+    albumName
+    assetTypeId
+    duration
+    sitePlayableFilePath
+  }
+}
+`
+	const Variables = {ids: [Id.toString()]}
+
+	const Payload = {query: Query, variables: Variables}
+
+	const Response = await fetch("https://search-api.artlist.io/v1/graphql", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(Payload)})
+	const JSONData = await Response.json()
+
+	var Data
+
+	try {
+		Data = JSONData.data.songs[0]
+	} catch (e) { }
+
+	if (Data === undefined) {
+		return false
+	}
+	
+	return Data
+}
+
+async function LoadAssetInfo(Id) {
+	const Pagetype = GetPagetype()
+	if (Pagetype === SFXS_PAGETYPE) {
+		SingleSoundEffectData = await GetSfxInfo(Id)
+		return true
+	}
+	if (Pagetype === SONGS_PAGETYPE) {
+		SingleSongData = await GetSongInfo(Id)
+		return true
+	}
+	return false
+}
+
+function GetAudioTable() {
+	return window.document.querySelector("table.w-full.table-fixed[data-testid=AudioTable]")
+}
+
+function GetSongPage() {
+	return window.document.querySelector("div[data-testid=SongPage]")
+}
+
+function GetBanner(SongPage) {
+	return SongPage.querySelector("div.relative.h-banner.min-h-95.w-full")
+}
+
+function GetActionRow(SongPage) {
+	if (window.innerWidth >= 1024) {
+		return SongPage.querySelector("div.hidden")
+	}
+	return SongPage.querySelector("div.block.py-4.px-6")
 }
 
 function GetTBody(AudioTable) {
@@ -107,65 +257,130 @@ function GetTBody(AudioTable) {
 	return TBody
 }
 
-function GetAudioRowData(AudioRow, Datatype) {
-	var Data = { SongTitle: "none", Artists: [], Button: "none", Datatype: Datatype }
-	for (const Child of AudioRow.childNodes) {
-		if (Child.getAttribute("data-testid") == "AlbumsAndArtists") {
-			try { // still using this method, because I couldn't find any other way to get the album title through just straight up HTML.
-				Data.SongTitle = Child.childNodes[0].childNodes[2].childNodes[0].childNodes[0].childNodes[0].childNodes[0].textContent
-			} catch (e) { console.warn("SongTitle: ", Child, e) }
-			try { // still using this method, because I couldn't find any other way to get the album title through just straight up HTML.
-				const ArtistsContainer = Child.childNodes[0].childNodes[2].childNodes[1].childNodes[0].childNodes[0].childNodes
-				for (const Artist of ArtistsContainer) {
-					Data.Artists.push(Artist.textContent.trim().replaceAll(",", ""))
-				}
-			} catch (e) { console.warn("ArtistsContainer: ", e) }
-		}
-		if (Child.getAttribute("data-testid") == "DataAndActions" && Datatype == MUSIC_DATATYPE) {
-			try { // still using this method, because I couldn't find any other way to get the album title through just straight up HTML.
-				Data.Button = Child.childNodes[0].childNodes[4].childNodes[0].childNodes[0].childNodes[0]
-			} catch (e) { console.warn("Button: ", Child, e) }
-		}
-		if (Child.getAttribute("data-testid") == "DataAndActions" && Datatype == SFX_DATATYPE) {
-			try { // still using this method, because I couldn't find any other way to get the album title through just straight up HTML.
-				Data.Button = Child.childNodes[0].childNodes[2].childNodes[0].childNodes[0].childNodes[0]
-			} catch (e) { console.warn("Button: ", Child, e) }
-		}
+function GetTBodyEdgeCase() {
+	const TBody = window.document.querySelector("div[data-testid=Wrapper]") || window.document.querySelector("div[data-testid=ArtistContent]")
+	if (TBody === null) {
+		return
+	}
+	if (TBody.parentNode.classList.contains("hidden")) {
+		return
+	}
+	return TBody
+}
+
+function GetAudioRowData(AudioRow, Pagetype) {
+	var Data = { AudioTitle: "none", Artists: [], Button: "none", Pagetype: Pagetype }
+	var AlbumsAndArtists = AudioRow.querySelector("td[data-testid=AlbumsAndArtists]")
+	var DataAndActions = AudioRow.querySelector("td[data-testid=DataAndActions]")
+
+	if (Pagetype === SONGS_PAGETYPE) {
+		AlbumsAndArtists = AudioRow.querySelector("div[data-testid=AudioDetails]")
+		DataAndActions = AudioRow.querySelector("div[data-testid=AnimatedToggleContainer]")
 	}
 
-	if (Data.SongTitle == "none" && Data.Artists.length == 0 && Data.Button == "none") {
-		// throw new ReferenceError("audio row doesn't have any data")
+	if (AlbumsAndArtists === null || DataAndActions === null) {
+		return Data
+	}
+
+	const AudioTitle = AlbumsAndArtists.querySelector("a.truncate[data-testid=Link]")
+	const Artists = AlbumsAndArtists.querySelectorAll("a.truncate.whitespace-pre.font-normal[data-testid=Link]")
+	const Button = DataAndActions.querySelector("button[aria-label='download']") || DataAndActions.querySelector("button[aria-label='Download']")
+
+	if (AudioTitle) {
+		Data.AudioTitle = AudioTitle.textContent.trim()
+	}
+	if (Artists) {
+		for (const Artist of Artists) {
+			Data.Artists.push(Artist.textContent.replaceAll(",", "").trim())
+		}
+	}
+	if (Button) {
+		Data.Button = Button
+	}
+
+	if (Data.AudioTitle === "none" && Data.Artists.length === 0 && Data.Button === "none") {
 		return false
 	}
-	if ((Data.SongTitle == "none" || Data.Artists.length == 0) && Data.Button != "none") {
+	if ((Data.AudioTitle === "none" || Data.Artists.length === 0) && Data.Button !== "none") {
 		Data.Button.style.color = ErrorButtonColor
 	}
 
 	return Data
 }
 
-function MakeFilename(AssetData, Datatype) {
-	return `${Datatype == MUSIC_DATATYPE ? "Music" : "Sfx"} ${AssetData.artistName} - ${AssetData.songName} ${AssetData.songName != AssetData.albumName ? `on ${AssetData.albumName}` : ''} (${AssetData.artistId}.${AssetData.albumId}.${AssetData.songId})`
+function GetBannerData(SongPage, Pagetype) {
+	const Data = { AudioTitle: "none", Artists: [], Button: "none", Pagetype: Pagetype }
+	
+	const Banner = GetBanner(SongPage)
+	const ActionRow = GetActionRow(SongPage)
+
+	if (Banner === null || ActionRow === null) {
+		return false
+	}
+
+	const Title = Banner.querySelector("h1[data-testid=Heading]")
+	const Artists = Banner.querySelectorAll("a[data-testid=Link]")
+	const Button = ActionRow.querySelector("button[aria-label='direct download']")
+
+	if (Title === null || Artists.length <= 0 || Button === null) {
+		return Data
+	}
+
+	Data.AudioTitle = Title.textContent
+	Data.Button = Button
+	
+	for (const Artist of Artists) {
+		Data.Artists.push(Artist.textContent.replaceAll(",", "").trim())
+	}
+	
+	if (Data.AudioTitle === "none" && Data.Artists.length == 0 && Data.Button === "none") {
+		return false
+	}
+	if ((Data.AudioTitle === "none" || Data.Artists.length == 0) && Data.Button != "none") {
+		Data.Button.style.color = ErrorButtonColor
+		Data.Button.style.borderColor = ErrorButtonColor
+	}
+
+	return Data
+}
+
+function MakeFilename(AssetData, Pagetype) {
+	const NoAlbum = AssetData.albumId === undefined
+	return `${(Pagetype === MUSIC_PAGETYPE || Pagetype === SONGS_PAGETYPE) ? "Music" : "Sfx"} ${AssetData.artistName} - ${AssetData.songName} ${AssetData.songName != AssetData.albumName ? `on ${AssetData.albumName} ` : ''}(${AssetData.artistId}.${NoAlbum ? '' : AssetData.albumId + '.'}${AssetData.songId})`
 }
 
 function WriteAudio(RowData, AudioData) {
-	const Datatype = RowData.Datatype
-	const FileName = MakeFilename(AudioData, Datatype)
+	const Pagetype = RowData.Pagetype
+	const ChosenColor = (Pagetype === MUSIC_PAGETYPE || Pagetype === SONGS_PAGETYPE) ? ModifiedMusicButtonColor : ModifiedSfxButtonColor
+	const FileName = MakeFilename(AudioData, Pagetype)
 	RowData.Button.setAttribute("artlist-dl", "modified")
-	RowData.Button.style.color = Datatype == MUSIC_DATATYPE ? ModifiedMusicButtonColor : ModifiedSfxButtonColor
-	RowData.Button.addEventListener("click", function(event) {
+	RowData.Button.style.color = ChosenColor
+	RowData.Button.addEventListener("click", function (event) {
+		event.stopImmediatePropagation() // prevent premium popup upsell
+		ShowSaveFilePickerForURL(AudioData.sitePlayableFilePath, FileName + ".aac");
+	}, true)
+}
+
+function WriteBanner(BannerData, AudioData) {
+	const Pagetype = BannerData.Pagetype
+	const ChosenColor = (Pagetype === MUSIC_PAGETYPE || Pagetype === SONGS_PAGETYPE) ? ModifiedMusicButtonColor : ModifiedSfxButtonColor
+	const FileName = MakeFilename(AudioData, Pagetype)
+	BannerData.Button.setAttribute("artlist-dl", "modified")
+	BannerData.Button.style.color = ChosenColor
+	BannerData.Button.style.borderColor = ChosenColor
+	BannerData.Button.addEventListener("click", function (event) {
 		event.stopImmediatePropagation() // prevent premium popup upsell
 		ShowSaveFilePickerForURL(AudioData.sitePlayableFilePath, FileName + ".aac");
 	}, true)
 }
 
 function MatchAudioToRow(AudioData, RowData) {
-	return AudioData.songName === RowData.SongTitle && RowData.Artists.indexOf(AudioData.artistName) != -1
+	return AudioData.songName.trim() === RowData.AudioTitle.trim() && RowData.Artists.indexOf(AudioData.artistName.trim()) != -1
 }
 
 function OnRowAdded(AudioRow, RowData, AudioData) {
 	AudioRow.setAttribute("artlist-dl-state", "modified")
-	if (AudioData !== undefined ){
+	if (AudioData !== undefined) {
 		WriteAudio(RowData, AudioData)
 	} else {
 		console.warn("No data given for row", RowData)
@@ -176,7 +391,7 @@ function OnRowAdded(AudioRow, RowData, AudioData) {
 }
 
 function GetAudioDataFromRowData(RowData) {
-	if (RowData.Datatype == SFX_DATATYPE) {
+	if (RowData.Pagetype === SFX_PAGETYPE) {
 		if (LoadedSfxLists.length <= 0) { console.warn("No loaded sound effects to loop through."); return }
 		for (const SfxList of LoadedSfxLists) {
 			for (const SfxData of SfxList) {
@@ -186,55 +401,91 @@ function GetAudioDataFromRowData(RowData) {
 			}
 		}
 	}
-	if (RowData.Datatype == MUSIC_DATATYPE) {
-		if (LoadedSongLists.length <= 0) { console.warn("No loaded songs to loop through."); return }
-		for (const SongList of LoadedSongLists) {
-			for (const SongData of SongList) {
+	if (RowData.Pagetype === MUSIC_PAGETYPE) {
+		if (LoadedMusicLists.length <= 0) { console.warn("No loaded songs to loop through."); return }
+		for (const MusicList of LoadedMusicLists) {
+			for (const SongData of MusicList) {
 				if (MatchAudioToRow(SongData, RowData)) {
 					return SongData
 				}
 			}
 		}
 	}
+	if (RowData.Pagetype === SFXS_PAGETYPE) {
+		if (LoadedSfxsList.length <= 0) { console.warn("No loaded similar sfxs to loop through."); return }
+		for (const SfxsList of LoadedSfxsList) {
+			for (const SfxData of SfxsList) {
+				if (MatchAudioToRow(SfxData, RowData)) {
+					return SfxData
+				}
+			}
+		}
+	}
+	if (RowData.Pagetype === SONGS_PAGETYPE) {
+		if (LoadedSongsList.length <= 0) { console.warn("No loaded similar songs to loop through."); return }
+		for (const SongsList of LoadedSongsList) {
+			for (const SongData of SongsList) {
+				if (MatchAudioToRow(SongData, RowData)) {
+					return SongData
+				}
+			}
+		}
+	}
+	
+	console.warn("Couldn't handle data:", RowData)
 }
 
 function ApplyXHR(XHR) {
-	XHR.addEventListener("readystatechange", function () {
-		if (XHR.readyState == XMLHttpRequest.DONE) {
-			var JSONData
-			try {
-				JSONData = JSON.parse(XHR.responseText)
-			} catch (e) {
-				console.warn(`Couldn't parse ${XHR.responseText}`)
-				return
+	const Pagetype = GetPagetype()
+
+	if (Pagetype !== UNKNOWN_DATATYPE) {
+		XHR.addEventListener("readystatechange", function () {
+			if (XHR.readyState == XMLHttpRequest.DONE) {
+				var JSONData
+				try {
+					JSONData = JSON.parse(XHR.responseText)
+				} catch (e) {
+					console.warn(`Couldn't parse as json: ${XHR.responseText}`)
+					return
+				}
+				HandleJSONData(JSONData)
 			}
-			HandleJSONData(JSONData)
-		}
-	})
+		})
+	}
 }
 
 function HandleJSONData(Data) {
 	const Datatype = GetDatatype(Data)
-	if (Datatype == MUSIC_DATATYPE) {
-		LoadedSongLists.push(Data.data.songList.songs)
-		return
+	if (Datatype === SONGS_PAGETYPE) {
+		LoadedSongsList.push(Data.data.songs[0].similarSongs)
 	}
-	if (Datatype == SFX_DATATYPE) {
+	if (Datatype === MUSIC_PAGETYPE) {
+		LoadedMusicLists.push(Data.data.songList.songs)
+	}
+	if (Datatype === SFXS_PAGETYPE) {
+		LoadedSfxsList.push(Data.data.sfxs[0].similarList)
+	}
+	if (Datatype === SFX_PAGETYPE) {
 		LoadedSfxLists.push(Data.data.sfxList.songs)
-		return
 	}
 }
 
-const oldXMLHttpRequestOpen = window.XMLHttpRequest.prototype.open
-window.XMLHttpRequest.prototype.open = function () {
-	const Method = (arguments)[0]
-	const URL = (arguments)[1]
-
-	if (MatchURL(URL)) {
-		ApplyXHR(this)
+function HookRequests() {
+	if (RequestsInterval != -1) {
+		clearInterval(RequestsInterval)
 	}
-
-	return oldXMLHttpRequestOpen.apply(this, arguments)
+	RequestsInterval = setInterval(() => {
+		window.XMLHttpRequest.prototype.open = function() {
+			const Method = (arguments)[0]
+			const URL = (arguments)[1]
+	
+			if (MatchURL(URL)) {
+				ApplyXHR(this)
+			}
+	
+			return oldXMLHttpRequestOpen.apply(this, arguments)
+		}
+	})
 }
 
 // this makes the user-script support the [←] Back and [→] Right navigations
@@ -246,39 +497,63 @@ window.XMLHttpRequest.prototype.open = function () {
 // occurs, and as far as i know there's no other better way to do it.
 // please make an issue on github and educate me if there is.
 
-function Until(testFunc) {
-	// https://stackoverflow.com/a/52657929
-	const poll = (resolve) => {
-	  if (testFunc()) {
-		resolve();
-	  } else setTimeout((_) => poll(resolve), 800);
-	};
-	return new Promise(poll)
-}
-
 async function Initialize() {
-	LastPath = location.pathname
+	DontPoll = false
 
-	await Until(() => {
-		return GetAudioTable() != undefined
-	})
-	AudioTable = GetAudioTable()
+	const Pagetype = GetPagetype()
 
-	await Until(() => {
-		return GetTBody(AudioTable) != undefined
-	})
-	TBody = GetTBody(AudioTable)
+	console.log("searching for table...")
+
+	if (Pagetype === SONGS_PAGETYPE || Pagetype === SFXS_PAGETYPE) {
+		const Id = location.pathname.split("/")[4]
+		const NumId = new Number(Id)
+		if (NumId.toString() !== "NaN") {
+			LoadAssetInfo(NumId)
+		}
+		SongPage = GetSongPage()
+		await Until(() => {
+			const Data = GetBannerData(SongPage, Pagetype)
+			return Data != false && Data.Button != "none"
+		})
+		const RowData = GetBannerData(SongPage, Pagetype)
+		await Until(() => {
+			return Pagetype === SONGS_PAGETYPE ? SingleSongData != "none" : SingleSoundEffectData != "none"
+		})
+		const AudioData = Pagetype === SONGS_PAGETYPE ? SingleSongData : SingleSoundEffectData
+		if (RowData.AudioTitle && RowData.Artists.length >= 1) {
+			WriteBanner(RowData, AudioData)
+		}
+	}
+
+	if (Pagetype === SONGS_PAGETYPE) {
+		await Until(() => {
+			return GetTBodyEdgeCase() != undefined
+		})
+		TBody = GetTBodyEdgeCase()
+	} else {
+		await Until(() => {
+			return GetAudioTable() != undefined
+		})
+		AudioTable = GetAudioTable()
+		console.log("table", AudioTable)
+	
+		await Until(() => {
+			return GetTBody(AudioTable) != undefined
+		})
+		TBody = GetTBody(AudioTable)
+		console.log("tbody", TBody)
+	}
 
 	function OnAudioRowAdded(AudioRow) {
 		if (AudioRow.getAttribute("artlist-dl-state") === "modified") { return }
-		if (AudioRow.classList <= 0 || AudioRow.classList.contains("hidden")) { return }
-		const RowData = GetAudioRowData(AudioRow, AreWeOnSFXPage() ? SFX_DATATYPE : MUSIC_DATATYPE)
+		if ((Pagetype !== SONGS_PAGETYPE && AudioRow.classList <= 0) || AudioRow.classList.contains("hidden")) { return }
+		const RowData = GetAudioRowData(AudioRow, GetPagetype())
 		const AudioData = GetAudioDataFromRowData(RowData)
-		
+
 		OnRowAdded(AudioRow, RowData, AudioData)
 	}
 
-	LastChangeObserver = new MutationObserver(function(MutationList, _Observer) {
+	LastChangeObserver = new MutationObserver(function (MutationList, _Observer) {
 		for (const Mutation of MutationList) {
 			if (Mutation.type === "childList" && Mutation.target == TBody) {
 				for (const AudioRow of Mutation.addedNodes) {
@@ -289,28 +564,29 @@ async function Initialize() {
 	})
 
 	LastChangeObserver.observe(TBody, {
-		attributes: false,
+		attributes: true,
 		childList: true,
 		subtree: true,
 	})
+	console.log("called observer")
 
 	for (const AudioRow of TBody.childNodes) {
 		OnAudioRowAdded(AudioRow)
 	}
 }
-document.addEventListener("DOMContentLoaded", (event) => {
+
+HookRequests()
+document.addEventListener("DOMContentLoaded", () => {
 	Initialize()
 	LastInterval = setInterval(() => {
-		const NowPath = location.pathname
-		if (LastPath != NowPath) {
-			if (!document.contains(TBody)) {
-				TBody = null
-				AudioTable = null
-				LastChangeObserver.disconnect()
-				Initialize()
-			}
-			return
+		if (TBody != null && !document.contains(TBody)) {
+			console.log("Re-updating...")
+			DontPoll = true
+			TBody = null
+			AudioTable = null
+			SongPage = null
+			try { LastChangeObserver.disconnect() } catch(e){  }
+			Initialize()
 		}
-		LastPath = NowPath
 	})
 })
