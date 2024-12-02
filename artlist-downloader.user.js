@@ -5,7 +5,7 @@
 // @author      Mia @ github.com/xNasuni
 // @match       *://*.artlist.io/*
 // @grant       none
-// @version     2.2
+// @version     2.3
 // @run-at	    document-start
 // @updateURL   https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @downloadURL https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
@@ -210,7 +210,7 @@ async function GetSongInfo(Id) {
 	if (Data === undefined) {
 		return false
 	}
-	
+
 	return Data
 }
 
@@ -287,7 +287,7 @@ function GetAudioRowData(AudioRow, Pagetype) {
 	const Button = DataAndActions.querySelector("button[aria-label='download']") || DataAndActions.querySelector("button[aria-label='Download']")
 
 	if (AudioTitle) {
-		Data.AudioTitle = AudioTitle.textContent.trim()
+		Data.AudioTitle = AudioTitle.childNodes[0].textContent.trim()
 	}
 	if (Artists) {
 		for (const Artist of Artists) {
@@ -310,7 +310,7 @@ function GetAudioRowData(AudioRow, Pagetype) {
 
 function GetBannerData(SongPage, Pagetype) {
 	const Data = { AudioTitle: "none", Artists: [], Button: "none", Pagetype: Pagetype }
-	
+
 	const Banner = GetBanner(SongPage)
 	const ActionRow = GetActionRow(SongPage)
 
@@ -328,11 +328,11 @@ function GetBannerData(SongPage, Pagetype) {
 
 	Data.AudioTitle = Title.textContent
 	Data.Button = Button
-	
+
 	for (const Artist of Artists) {
 		Data.Artists.push(Artist.textContent.replaceAll(",", "").trim())
 	}
-	
+
 	if (Data.AudioTitle === "none" && Data.Artists.length == 0 && Data.Button === "none") {
 		return false
 	}
@@ -431,7 +431,7 @@ function GetAudioDataFromRowData(RowData) {
 			}
 		}
 	}
-	
+
 	console.warn("Couldn't handle data:", RowData)
 }
 
@@ -478,11 +478,11 @@ function HookRequests() {
 		window.XMLHttpRequest.prototype.open = function() {
 			const Method = (arguments)[0]
 			const URL = (arguments)[1]
-	
+
 			if (MatchURL(URL)) {
 				ApplyXHR(this)
 			}
-	
+
 			return oldXMLHttpRequestOpen.apply(this, arguments)
 		}
 	})
@@ -536,7 +536,7 @@ async function Initialize() {
 		})
 		AudioTable = GetAudioTable()
 		console.log("table", AudioTable)
-	
+
 		await Until(() => {
 			return GetTBody(AudioTable) != undefined
 		})
