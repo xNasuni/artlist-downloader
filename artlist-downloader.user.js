@@ -5,8 +5,8 @@
 // @author      Mia @ github.com/xNasuni
 // @match       *://*.artlist.io/*
 // @grant       none
-// @version     2.3
-// @run-at	    document-start
+// @version     2.4
+// @run-at	document-start
 // @updateURL   https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @downloadURL https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @supportURL  https://github.com/xNasuni/artlist-downloader/issues
@@ -236,7 +236,7 @@ function GetSongPage() {
 }
 
 function GetBanner(SongPage) {
-	return SongPage.querySelector("div.relative.h-banner.min-h-95.w-full")
+	return SongPage.querySelector("div.relative.min-h-95.w-full")
 }
 
 function GetActionRow(SongPage) {
@@ -246,15 +246,8 @@ function GetActionRow(SongPage) {
 	return SongPage.querySelector("div.block.py-4.px-6")
 }
 
-function GetTBody(AudioTable) {
-	var TBody = undefined
-	for (const Child of AudioTable.childNodes) {
-		if (Child.nodeName === "TBODY") {
-			TBody = Child
-			break
-		}
-	}
-	return TBody
+function GetTBody() {
+  return window.document.querySelector("div.w-full[data-testid=ComposableAudioList]") || window.document.querySelector("table[data-testid=AudioTable]>tbody")
 }
 
 function GetTBodyEdgeCase() {
@@ -269,7 +262,7 @@ function GetTBodyEdgeCase() {
 }
 
 function GetAudioRowData(AudioRow, Pagetype) {
-	var Data = { AudioTitle: "none", Artists: [], Button: "none", Pagetype: Pagetype }
+	var Data = { AudioTitle: "none", Artists: [], Button: null, Pagetype: Pagetype }
 	var AlbumsAndArtists = AudioRow.querySelector("td[data-testid=AlbumsAndArtists]")
 	var DataAndActions = AudioRow.querySelector("td[data-testid=DataAndActions]")
 
@@ -278,13 +271,23 @@ function GetAudioRowData(AudioRow, Pagetype) {
 		DataAndActions = AudioRow.querySelector("div[data-testid=AnimatedToggleContainer]")
 	}
 
+  if (Pagetype == MUSIC_PAGETYPE) {
+    AlbumsAndArtists = AudioRow.querySelector("div.flex[data-testid=AudioDetails]")
+   DataAndActions = AudioRow.querySelector("div[data-testid=AnimatedToggleContainer]")
+  }
+
+	var Button = DataAndActions.querySelector("button[aria-label='download']") || DataAndActions.querySelector("button[aria-label='Download']")
+
+  if (Button) {
+    Data.Button = Button
+  }
+
 	if (AlbumsAndArtists === null || DataAndActions === null) {
 		return Data
 	}
 
 	const AudioTitle = AlbumsAndArtists.querySelector("a.truncate[data-testid=Link]")
 	const Artists = AlbumsAndArtists.querySelectorAll("a.truncate.whitespace-pre.font-normal[data-testid=Link]")
-	const Button = DataAndActions.querySelector("button[aria-label='download']") || DataAndActions.querySelector("button[aria-label='Download']")
 
 	if (AudioTitle) {
 		Data.AudioTitle = AudioTitle.childNodes[0].textContent.trim()
@@ -294,14 +297,11 @@ function GetAudioRowData(AudioRow, Pagetype) {
 			Data.Artists.push(Artist.textContent.replaceAll(",", "").trim())
 		}
 	}
-	if (Button) {
-		Data.Button = Button
-	}
 
-	if (Data.AudioTitle === "none" && Data.Artists.length === 0 && Data.Button === "none") {
+	if (Data.AudioTitle === "none" && Data.Artists.length === 0 && Data.Button == null) {
 		return false
 	}
-	if ((Data.AudioTitle === "none" || Data.Artists.length === 0) && Data.Button !== "none") {
+	if ((Data.AudioTitle === "none" || Data.Artists.length === 0) && Data.Button !== null) {
 		Data.Button.style.color = ErrorButtonColor
 	}
 
@@ -309,7 +309,7 @@ function GetAudioRowData(AudioRow, Pagetype) {
 }
 
 function GetBannerData(SongPage, Pagetype) {
-	const Data = { AudioTitle: "none", Artists: [], Button: "none", Pagetype: Pagetype }
+	const Data = { AudioTitle: "none", Artists: [], Button: null, Pagetype: Pagetype }
 
 	const Banner = GetBanner(SongPage)
 	const ActionRow = GetActionRow(SongPage)
@@ -322,7 +322,7 @@ function GetBannerData(SongPage, Pagetype) {
 	const Artists = Banner.querySelectorAll("a[data-testid=Link]")
 	const Button = ActionRow.querySelector("button[aria-label='direct download']")
 
-	if (Title === null || Artists.length <= 0 || Button === null) {
+	if (Title == null || Artists.length <= 0 || Button == null) {
 		return Data
 	}
 
@@ -333,10 +333,10 @@ function GetBannerData(SongPage, Pagetype) {
 		Data.Artists.push(Artist.textContent.replaceAll(",", "").trim())
 	}
 
-	if (Data.AudioTitle === "none" && Data.Artists.length == 0 && Data.Button === "none") {
+	if (Data.AudioTitle === "none" && Data.Artists.length == 0 && Data.Button == null) {
 		return false
 	}
-	if ((Data.AudioTitle === "none" || Data.Artists.length == 0) && Data.Button != "none") {
+	if ((Data.AudioTitle === "none" || Data.Artists.length == 0) && Data.Button != null) {
 		Data.Button.style.color = ErrorButtonColor
 		Data.Button.style.borderColor = ErrorButtonColor
 	}
@@ -384,7 +384,7 @@ function OnRowAdded(AudioRow, RowData, AudioData) {
 		WriteAudio(RowData, AudioData)
 	} else {
 		console.warn("No data given for row", RowData)
-		if (RowData.Button !== "none") {
+		if (RowData.Button !== null) {
 			RowData.Button.style.color = ErrorButtonColor
 		}
 	}
@@ -513,7 +513,7 @@ async function Initialize() {
 		SongPage = GetSongPage()
 		await Until(() => {
 			const Data = GetBannerData(SongPage, Pagetype)
-			return Data != false && Data.Button != "none"
+			return Data != false && Data.Button != null
 		})
 		const RowData = GetBannerData(SongPage, Pagetype)
 		await Until(() => {
@@ -532,21 +532,15 @@ async function Initialize() {
 		TBody = GetTBodyEdgeCase()
 	} else {
 		await Until(() => {
-			return GetAudioTable() != undefined
+			return GetTBody() != undefined
 		})
-		AudioTable = GetAudioTable()
-		console.log("table", AudioTable)
-
-		await Until(() => {
-			return GetTBody(AudioTable) != undefined
-		})
-		TBody = GetTBody(AudioTable)
+		TBody = GetTBody()
 		console.log("tbody", TBody)
 	}
 
 	function OnAudioRowAdded(AudioRow) {
 		if (AudioRow.getAttribute("artlist-dl-state") === "modified") { return }
-		if ((Pagetype !== SONGS_PAGETYPE && AudioRow.classList <= 0) || AudioRow.classList.contains("hidden")) { return }
+		if (AudioRow.classList.contains("hidden")) { return }
 		const RowData = GetAudioRowData(AudioRow, GetPagetype())
 		const AudioData = GetAudioDataFromRowData(RowData)
 
@@ -556,6 +550,7 @@ async function Initialize() {
 	LastChangeObserver = new MutationObserver(function (MutationList, _Observer) {
 		for (const Mutation of MutationList) {
 			if (Mutation.type === "childList" && Mutation.target == TBody) {
+        console.log("AddedNodes:", Mutation.addedNodes)
 				for (const AudioRow of Mutation.addedNodes) {
 					OnAudioRowAdded(AudioRow)
 				}
