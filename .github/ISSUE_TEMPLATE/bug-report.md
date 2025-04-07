@@ -1,6 +1,6 @@
 ---
-name: Bug report
-about: Create a report to help us improve
+name: BUG REPORT
+about: USE THIS TO REPORT A BUG IF SCRIPT ISN'T WORKING!
 title: ''
 labels: bug
 assignees: xNasuni
