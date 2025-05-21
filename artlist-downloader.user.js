@@ -6,7 +6,7 @@
 // @match       *://*.artlist.io/*
 // @grant       none
 // @require     https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js
-// @version     2.5
+// @version     2.6
 // @run-at	    document-start
 // @updateURL   https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @downloadURL https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
@@ -399,7 +399,7 @@ function GetAudioRowData(AudioRow, Pagetype) {
     }
 
     const AudioTitle = AlbumsAndArtists.querySelector("a.truncate[data-testid=Link]")
-    const Artists = AlbumsAndArtists.querySelectorAll("a.truncate.whitespace-pre.font-normal[data-testid=Link]")
+    const Artists = AlbumsAndArtists.querySelectorAll("a.truncate.text-gray-200[data-testid=Link]")
 
     if (AudioTitle) {
         Data.AudioTitle = AudioTitle.childNodes[0].textContent.trim()
