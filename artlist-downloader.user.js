@@ -4,9 +4,10 @@
 // @description Allows you to download artlist.io Music & SFX
 // @author      Mia @ github.com/xNasuni
 // @match       *://*.artlist.io/*
-// @grant       none
+// @grant       GM_xmlhttpRequest
+// @connect     cms-public-artifacts.artlist.io
 // @require     https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js
-// @version     2.7
+// @version     2.8
 // @run-at	    document-start
 // @updateURL   https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @downloadURL https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
@@ -44,20 +45,39 @@ var SingleSoundEffectData = "none"
 var SingleSongData = "none"
 
 async function ShowSaveFilePickerForURL(url, filename) {
-    let blobDataFromURL = await fetch(url).then((r) => r.blob());
+    let blobDataFromURL = null;
+
+    if (typeof GM_xmlhttpRequest !== "undefined") {
+        blobDataFromURL = await new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: url,
+                responseType: "blob",
+                onload: (res) => {
+                    if (res.response) resolve(res.response);
+                    else reject(new Error("empty response"));
+                },
+                onerror: (err) => reject(err),
+            });
+        });
+    } else {
+        console.warn("using native fetch, GM_xmlhttpRequest not found");
+        blobDataFromURL = await fetch(url).then((r) => r.blob());
+    }
+
     try {
-        if (window.showSaveFilePicker) {
+        if (unsafeWindow.showSaveFilePicker) {
             const BlobData = new Blob([blobDataFromURL], {
                 type: "audio/aac"
             });
-            const Handle = await window.showSaveFilePicker({
+            const Handle = await unsafeWindow.showSaveFilePicker({
                 suggestedName: filename,
                 types: [{
                     description: "AAC File (Compressed MP3)",
                     accept: {
                         "audio/aac": [".aac"]
                     },
-                }, ],
+                },],
             });
             const Writable = await Handle.createWritable();
             await Writable.write(BlobData);
@@ -97,7 +117,7 @@ async function ShowSaveFilePickerForURLsZipped(files, filename) {
                     accept: {
                         "application/zip": [".zip"]
                     },
-                }, ],
+                },],
             });
 
             const writable = await handle.createWritable();
@@ -158,38 +178,38 @@ function GetDatatype(Data) {
         if (Data.data.sfxList != undefined && Data.data.sfxList.songs != undefined) {
             Datatype = SFX_PAGETYPE
         }
-    } catch (e) {}
+    } catch (e) { }
     try {
         if (Data.data.songList != undefined && Data.data.songList.songs != undefined) {
             Datatype = MUSIC_PAGETYPE
         }
-    } catch (e) {}
+    } catch (e) { }
     try {
         if (Data.data.sfxs != undefined && Data.data.sfxs.length === 1 && Data.data.sfxs[0].similarList != undefined) {
             Datatype = SFXS_PAGETYPE
         }
-    } catch (e) {}
+    } catch (e) { }
     try {
         if (Data.data.sfxs != undefined && Data.data.sfxs.length === 1 && Data.data.sfxs[0].songName != undefined) {
             Datatype = SINGLE_SOUND_EFFECT_DATATYPE
         }
-    } catch (e) {}
+    } catch (e) { }
     try {
         if (Data.data.songs != undefined && Data.data.songs.length === 1 && Data.data.songs[0].songName != undefined) {
             Datatype = SINGLE_SONG_DATATYPE
         }
-    } catch (e) {}
+    } catch (e) { }
     try {
         if (Data.data.songs != undefined && Data.data.songs.length === 1 && Data.data.songs[0].similarSongs != undefined) {
             Datatype = SONGS_PAGETYPE
         }
-    } catch (e) {}
+    } catch (e) { }
 
     try {
         if (Data.data.songs != undefined && Data.data.songs.length === 1 && Data.data.songs[0].stems != undefined) {
             Datatype = SONG_STEMS_PAGETYPE
         }
-    } catch (e) {}
+    } catch (e) { }
 
     return Datatype
 }
@@ -245,7 +265,7 @@ async function GetSfxInfo(Id) {
 
     try {
         Data = JSONData.data.sfxs[0]
-    } catch (e) {}
+    } catch (e) { }
 
     if (Data === undefined) {
         return false
@@ -291,7 +311,7 @@ async function GetSongInfo(Id) {
 
     try {
         Data = JSONData.data.songs[0]
-    } catch (e) {}
+    } catch (e) { }
 
     if (Data === undefined) {
         return false
@@ -475,7 +495,7 @@ function WriteAudio(RowData, AudioData) {
     const FileName = MakeFilename(AudioData, Pagetype)
     RowData.Button.setAttribute("artlist-dl-processed", "true")
     RowData.Button.style.color = ChosenColor
-    RowData.Button.addEventListener("click", function(event) {
+    RowData.Button.addEventListener("click", function (event) {
         event.stopImmediatePropagation() // prevent premium popup upsell
         ShowSaveFilePickerForURL((AudioData.sitePlayableFilePath || AudioData.playableFileUrl), FileName + ".aac");
     }, true)
@@ -488,7 +508,7 @@ function WriteBanner(BannerData, AudioData) {
     BannerData.Button.setAttribute("artlist-dl-processed", "true")
     BannerData.Button.style.color = ChosenColor
     BannerData.Button.style.borderColor = ChosenColor
-    BannerData.Button.addEventListener("click", function(event) {
+    BannerData.Button.addEventListener("click", function (event) {
         event.stopImmediatePropagation() // prevent premium popup upsell
         ShowSaveFilePickerForURL((AudioData.sitePlayableFilePath || AudioData.playableFileUrl), FileName + ".aac");
     }, true)
@@ -502,12 +522,12 @@ function WriteDownloadAllStems(StemsContainer, DownloadButton) {
     DownloadButton.style.backgroundColor = ChosenColor
     DownloadButton.style.borderColor = ChosenColor
     DownloadButton.style.color = "black"
-    DownloadButton.addEventListener("click", async function(event) {
+    DownloadButton.addEventListener("click", async function (event) {
         event.stopImmediatePropagation() // prevent dropdown
         clearInterval(changeBackTimeout)
         changeBackTimeout = setTimeout(() => {
-          DownloadButton.querySelector("span.whitespace-nowrap").innerText = "Download All Stems"
-          DownloadButton.disabled = false
+            DownloadButton.querySelector("span.whitespace-nowrap").innerText = "Download All Stems"
+            DownloadButton.disabled = false
         }, 10000)
         DownloadButton.querySelector("span.whitespace-nowrap").innerText = "Please Wait..."
         DownloadButton.disabled = true
@@ -639,7 +659,7 @@ function ApplyXHR(XHR) {
     const Pagetype = GetPagetype()
 
     if (Pagetype !== UNKNOWN_DATATYPE) {
-        XHR.addEventListener("readystatechange", function() {
+        XHR.addEventListener("readystatechange", function () {
             if (XHR.readyState == XMLHttpRequest.DONE) {
                 var JSONData
                 try {
@@ -675,7 +695,7 @@ function HandleJSONData(Data) {
 }
 
 function HookRequests() {
-    var handler = function() {
+    var handler = function () {
         const Method = (arguments)[0]
         const URL = (arguments)[1]
 
@@ -781,7 +801,7 @@ async function Initialize() {
                     try {
                         OnAudioRowAdded(Stem)
                         Stem.setAttribute("artlist-dl-processed", "true")
-                    } catch (e) {} // will fail on false positives so just hide errors
+                    } catch (e) { } // will fail on false positives so just hide errors
                 }
             }
         }
