@@ -82,6 +82,7 @@ async function ShowSaveFilePickerForURL(url, filename) {
     }
 
     try {
+        // 1. WEG: Wenn der Browser showSaveFilePicker unterstützt (z.B. Chrome unter Windows/Mac)
         if (unsafeWindow.showSaveFilePicker) {
             const BlobData = new Blob([blobDataFromURL], {
                 type: 'audio/aac'
@@ -101,17 +102,29 @@ async function ShowSaveFilePickerForURL(url, filename) {
             await Writable.write(BlobData)
             await Writable.close()
         } else {
-            const blobURL = URL.createObjectURL(blobDataFromURL)
+            // 2. WEG: Für Safari und Browser ohne FilePicker Support (Unser Fix!)
+            const newBlob = new Blob([blobDataFromURL], { type: 'application/octet-stream' })
+            const blobURL = URL.createObjectURL(newBlob)
             const a = document.createElement('a')
             a.href = blobURL
             a.download = filename
             document.body.appendChild(a)
             a.click()
-            document.body.removeChild(a)
-            URL.revokeObjectURL(blobURL)
+            setTimeout(() => {
+                document.body.removeChild(a)
+                URL.revokeObjectURL(blobURL)
+            }, 100)
         }
     } catch (e) {
-        console.error('Error saving file:', e)
+        console.warn('Download-Fehler, weiche auf direkten Link aus:', e)
+        // 3. WEG: Fallback, falls die Blob-Erstellung komplett blockiert wird
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        a.target = '_blank'
+        document.body.appendChild(a)
+        a.click()
+        setTimeout(() => document.body.removeChild(a), 100)
     }
 }
 
@@ -425,9 +438,10 @@ async function LoadAssetInfo(Id) {
 }
 
 function GetAudioTable() {
-    return unsafeWindow.document.querySelector(
-        'table.w-full.table-fixed[data-testid=AudioTable]'
-    )
+    return unsafeWindow.document.querySelector('table') ||
+           unsafeWindow.document.querySelector('[data-testid=AudioTable]') ||
+           unsafeWindow.document.querySelector('[data-testid=ComposableAudioList]') ||
+           unsafeWindow.document.querySelector('main table');
 }
 
 function GetSongPage() {
@@ -451,12 +465,10 @@ function GetActionRow(SongPage) {
 
 function GetTBody() {
     return (
-        unsafeWindow.document.querySelector(
-            'div.w-full[data-testid=ComposableAudioList]'
-        ) ||
-        unsafeWindow.document.querySelector(
-            'table[data-testid=AudioTable]>tbody'
-        )
+        unsafeWindow.document.querySelector('div[data-testid=ComposableAudioList]') ||
+        unsafeWindow.document.querySelector('table tbody') ||
+        unsafeWindow.document.querySelector('[data-testid=AudioTable] tbody') ||
+        unsafeWindow.document.querySelector('main tbody')
     )
 }
 
