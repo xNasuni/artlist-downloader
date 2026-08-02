@@ -8,7 +8,7 @@
 // @connect     cms-public-artifacts.artlist.io
 // @connect     cms-artifacts.artlist.io
 // @require     https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js
-// @version     3.0
+// @version     3.1
 // @run-at	    document-start
 // @updateURL   https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @downloadURL https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
@@ -62,7 +62,13 @@ async function ShowSaveFilePickerForURL(url, filename) {
                 method: 'GET',
                 url: url,
                 headers: {
-                    Referer: 'https://artlist.io/'
+					Referer: 'https://artlist.io/',
+					["Sec-Fetch-Dest"]: 'audio',
+					["Sec-Fetch-Mode"]: 'cors',
+					["Sec-Fetch-Site"]: 'same-site',
+					Accept: 'audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,application/ogg;q=0.7,video/*;q=0.6,*/*;q=0.5',
+					["Accept-Language"]: 'en-US,en;q=0.9',
+					["Accept-Encoding"]: 'identity'
                 },
                 responseType: 'blob',
                 onload: res => {
@@ -76,7 +82,13 @@ async function ShowSaveFilePickerForURL(url, filename) {
         console.warn('using native fetch, GM_xmlhttpRequest not found')
         blobDataFromURL = await fetch(url, {
             headers: {
-                Referer: 'https://artlist.io/'
+					Referer: 'https://artlist.io/',
+					["Sec-Fetch-Dest"]: 'audio',
+					["Sec-Fetch-Mode"]: 'cors',
+					["Sec-Fetch-Site"]: 'same-site',
+					Accept: 'audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,application/ogg;q=0.7,video/*;q=0.6,*/*;q=0.5',
+					["Accept-Language"]: 'en-US,en;q=0.9',
+					["Accept-Encoding"]: 'identity'
             }
         }).then(r => r.blob())
     }
