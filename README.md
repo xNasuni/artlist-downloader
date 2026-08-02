@@ -1,4 +1,4 @@
-# artlist-downloader **`v3.0`**
+# artlist-downloader **`v3.1`**
 
 > [!CAUTION]
 > The audio(s) that you download using this are **NOT** allowed for commerical use or for use in YouTube Videos and alike **[without the proper licensing](https://artlist.io/page/pricing/music-and-sfx)**.
@@ -17,7 +17,7 @@
 
 > [!NOTE]
 > In order to install the userscript you need to have a Userscript Manager, these are some I recommend:
-> * **[TamperMonkey](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo) — Personal Choice**
+> * **[TamperMonkey Chromium](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo), [TamperMonkey Firefox](https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/) — Personal Choice**
 > * **[OrangeMonkey](https://chromewebstore.google.com/detail/orangemonkey/ekmeppjgajofkpiofbebgcbohbmfldaf)**
 
 ## Extra Information
