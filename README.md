@@ -1,4 +1,4 @@
-# artlist-downloader **`v3.1`**
+# artlist-downloader **`v3.2`**
 
 > [!CAUTION]
 > The audio(s) that you download using this are **NOT** allowed for commerical use or for use in YouTube Videos and alike **[without the proper licensing](https://artlist.io/page/pricing/music-and-sfx)**.

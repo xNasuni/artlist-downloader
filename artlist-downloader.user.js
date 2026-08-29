@@ -8,7 +8,7 @@
 // @connect     cms-public-artifacts.artlist.io
 // @connect     cms-artifacts.artlist.io
 // @require     https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js
-// @version     3.1
+// @version     3.2
 // @run-at	    document-start
 // @updateURL   https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @downloadURL https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
@@ -55,21 +55,22 @@ async function ShowSaveFilePickerForURL(url, filename) {
     }
 
     let blobDataFromURL = null
+    const headers = {
+        Referer: 'https://artlist.io/',
+        ['Sec-Fetch-Dest']: 'audio',
+        ['Sec-Fetch-Mode']: 'cors',
+        ['Sec-Fetch-Site']: 'same-site',
+        Accept: 'audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,application/ogg;q=0.7,video/*;q=0.6,*/*;q=0.5',
+        ['Accept-Language']: 'en-US,en;q=0.9',
+        ['Accept-Encoding']: 'identity'
+    }
 
     if (typeof GM_xmlhttpRequest !== 'undefined') {
         blobDataFromURL = await new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method: 'GET',
                 url: url,
-                headers: {
-					Referer: 'https://artlist.io/',
-					["Sec-Fetch-Dest"]: 'audio',
-					["Sec-Fetch-Mode"]: 'cors',
-					["Sec-Fetch-Site"]: 'same-site',
-					Accept: 'audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,application/ogg;q=0.7,video/*;q=0.6,*/*;q=0.5',
-					["Accept-Language"]: 'en-US,en;q=0.9',
-					["Accept-Encoding"]: 'identity'
-                },
+                headers,
                 responseType: 'blob',
                 onload: res => {
                     if (res.response) resolve(res.response)
@@ -81,15 +82,7 @@ async function ShowSaveFilePickerForURL(url, filename) {
     } else {
         console.warn('using native fetch, GM_xmlhttpRequest not found')
         blobDataFromURL = await fetch(url, {
-            headers: {
-					Referer: 'https://artlist.io/',
-					["Sec-Fetch-Dest"]: 'audio',
-					["Sec-Fetch-Mode"]: 'cors',
-					["Sec-Fetch-Site"]: 'same-site',
-					Accept: 'audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,application/ogg;q=0.7,video/*;q=0.6,*/*;q=0.5',
-					["Accept-Language"]: 'en-US,en;q=0.9',
-					["Accept-Encoding"]: 'identity'
-            }
+            headers
         }).then(r => r.blob())
     }
 
@@ -127,31 +120,47 @@ async function ShowSaveFilePickerForURL(url, filename) {
     }
 }
 
-async function ShowSaveFilePickerForURLsZipped(files, filename) {
-    try {
-        const zip = new JSZip()
+async function DownloadAndShowSaveFilePickerForURLsZipped(
+    files,
+    filename,
+    callback
+) {
+    let handle = null
 
-        for (const file of files) {
-            const blobDataFromURL = await fetch(file.URL).then(r => r.blob())
-            zip.file(file.Filename, blobDataFromURL)
-        }
-
-        const zipBlob = await zip.generateAsync({
-            type: 'blob'
-        })
-        if (unsafeWindow.showSaveFilePicker) {
-            const handle = await unsafeWindow.showSaveFilePicker({
+    if (unsafeWindow.showSaveFilePicker) {
+        try {
+            handle = await unsafeWindow.showSaveFilePicker({
                 suggestedName: filename,
                 types: [
                     {
                         description: 'ZIP File',
-                        accept: {
-                            'application/zip': ['.zip']
-                        }
+                        accept: { 'application/zip': ['.zip'] }
                     }
                 ]
             })
+        } catch (e) {
+            console.warn('Save picker cancelled or unavailable:', e)
+            return
+        }
+    }
 
+    try {
+        const zip = new JSZip()
+        const total = files.length
+
+        for (let i = 0; i < total; i++) {
+            const file = files[i]
+            const blob = await fetch(file.URL).then(r => r.blob())
+            zip.file(file.Filename, blob)
+
+            if (typeof callback === 'function') {
+                callback(i + 1, total)
+            }
+        }
+
+        const zipBlob = await zip.generateAsync({ type: 'blob' })
+
+        if (handle) {
             const writable = await handle.createWritable()
             await writable.write(zipBlob)
             await writable.close()
@@ -294,7 +303,7 @@ function GetDatatype(Data) {
     try {
         if (
             Data.data.songs != undefined &&
-            Data.data.songs.length === 1 &&
+            Data.data.songs.length >= 1 &&
             Data.data.songs[0].stems != undefined
         ) {
             Datatype = SONG_STEMS_PAGETYPE
@@ -505,6 +514,25 @@ function GetAudioRowData(AudioRow, Pagetype) {
         Button: null,
         Pagetype: Pagetype
     }
+
+    if (Pagetype == SONG_STEMS_PAGETYPE) {
+        const title = AudioRow.querySelector(
+            'span[data-testid=stems-player-stem-name]'
+        )
+        const button = AudioRow.querySelector(
+            'button[data-testid=DownloadButton]'
+        )
+
+        if (!title || !button) {
+            return Data
+        }
+
+        Data.AudioTitle = title.innerText.trim()
+        Data.RawTitle = title.innerText
+        Data.Button = button
+        return Data
+    }
+
     var AlbumsAndArtists = AudioRow.querySelector(
         'td[data-testid=AlbumsAndArtists]'
     )
@@ -528,33 +556,6 @@ function GetAudioRowData(AudioRow, Pagetype) {
         DataAndActions = AudioRow.querySelector(
             'div[data-testid=AnimatedToggleContainer]'
         )
-    }
-
-    if (
-        DataAndActions == null &&
-        AudioRow.querySelector('span[data-testid=stems-player-stem-name]') &&
-        AudioRow.parentNode.getAttribute('data-testid') != 'ComposableAudioList'
-    ) {
-        // most likely a song stem, so default to audio row
-        const StemContainer = AudioRow.parentNode.parentNode
-        const Title = StemContainer.querySelector(
-            'span[data-testid=stems-player-song-name]'
-        )
-        const Artists = StemContainer.querySelectorAll(
-            'span[data-testid=stems-player-song-artist]'
-        )
-
-        Data.Pagetype = SONG_STEMS_PAGETYPE
-        Data.AudioTitle = `${AudioRow.querySelector('span[data-testid=stems-player-stem-name]').innerText} of ${Title.innerText}`
-        Data.RawTitle = AudioRow.querySelector(
-            'span[data-testid=stems-player-stem-name]'
-        ).innerText
-
-        for (const Artist of Artists) {
-            Data.Artists.push(Artist.innerText)
-        }
-
-        DataAndActions = AudioRow
     }
 
     if (!DataAndActions) {
@@ -659,9 +660,9 @@ function GetBannerData(SongPage, Pagetype) {
     return Data
 }
 
-function MakeFilename(AssetData, Pagetype) {
+function MakeFilename(AssetData, Datatype) {
     const NoAlbum = AssetData.albumId === undefined
-    return `${Pagetype === MUSIC_PAGETYPE || Pagetype === SONGS_PAGETYPE || Pagetype === SONG_STEMS_PAGETYPE ? (Pagetype == SONG_STEMS_PAGETYPE ? 'Music Stem' : 'Music') : 'Sfx'} ${AssetData.artistName} - ${AssetData.songName} ${AssetData.songName != AssetData.albumName ? `on ${AssetData.albumName} ` : ''}(${AssetData.artistId}.${NoAlbum ? '' : AssetData.albumId + '.'}${AssetData.songId})`
+    return `${Datatype === MUSIC_PAGETYPE || Datatype === SONGS_PAGETYPE || Datatype === SONG_STEMS_PAGETYPE ? (Datatype == SONG_STEMS_PAGETYPE ? 'Music Stem' : 'Music') : 'Sfx'} ${AssetData.artistName} - ${AssetData.songName} ${AssetData.songName != AssetData.albumName ? `on ${AssetData.albumName} ` : ''}(${AssetData.artistId}.${NoAlbum ? '' : AssetData.albumId + '.'}${AssetData.songId})`
 }
 
 function WriteAudio(RowData, AudioData) {
@@ -714,60 +715,6 @@ function WriteBanner(BannerData, AudioData) {
     )
 }
 
-var changeBackTimeout = -1
-function WriteDownloadAllStems(StemsContainer, DownloadButton) {
-    const Pagetype = GetPagetype()
-    const ChosenColor = ModifiedMusicButtonColor
-    DownloadButton.setAttribute('artlist-dl-processed', 'true')
-    DownloadButton.style.backgroundColor = ChosenColor
-    DownloadButton.style.borderColor = ChosenColor
-    DownloadButton.style.color = 'black'
-    DownloadButton.addEventListener('click', async function (event) {
-        event.stopImmediatePropagation() // prevent dropdown
-        clearInterval(changeBackTimeout)
-        changeBackTimeout = setTimeout(() => {
-            DownloadButton.querySelector('span.whitespace-nowrap').innerText =
-                'Download All Stems'
-            DownloadButton.disabled = false
-        }, 10000)
-        DownloadButton.querySelector('span.whitespace-nowrap').innerText =
-            'Please Wait...'
-        DownloadButton.disabled = true
-        const dataList = []
-        var firstData = null
-        for (const StemDescendant of StemsContainer.querySelectorAll(
-            'span[data-testid=stems-player-stem-name]'
-        )) {
-            const Stem = StemDescendant.parentNode
-            try {
-                const AudioData = GetAudioDataFromRowData(
-                    GetAudioRowData(Stem, SONG_STEMS_PAGETYPE)
-                )
-                if (!firstData) {
-                    firstData = AudioData
-                }
-
-                dataList.push({
-                    URL:
-                        AudioData.sitePlayableFilePath ||
-                        AudioData.playableFileUrl,
-                    Filename:
-                        MakeFilename(AudioData, SONG_STEMS_PAGETYPE) + '.aac'
-                })
-            } catch (e) {
-                console.warn('Exception while handling stem rows:', e)
-            }
-        }
-
-        const fileName = `Music Stems ${firstData.artistName} - ${firstData._songName}${firstData._songName == firstData._albumName ? '' : ` on ${firstData._albumName}`}.zip`
-        await ShowSaveFilePickerForURLsZipped(dataList, fileName)
-        clearInterval(changeBackTimeout)
-        DownloadButton.querySelector('span.whitespace-nowrap').innerText =
-            'Download All Stems'
-        DownloadButton.disabled = false
-    })
-}
-
 function MatchAudioToRow(AudioData, RowData, SkipArtistCheck) {
     return (
         (AudioData.songName || AudioData.name).trim() ===
@@ -777,30 +724,14 @@ function MatchAudioToRow(AudioData, RowData, SkipArtistCheck) {
     )
 }
 
-function OnRowAdded(AudioRow, RowData, AudioData) {
-    AudioRow.setAttribute('artlist-dl-state', 'modified')
-    if (AudioData !== undefined) {
-        WriteAudio(RowData, AudioData)
-    } else {
-        console.warn('No data given for row', RowData)
-        if (RowData.Button !== null) {
-            RowData.Button.style.color = ErrorButtonColor
-        }
-    }
-}
-
 function cloneref(object) {
     return {
         ...object
     }
 }
 
-function transformIndexedObject2Array(object) {
-    return Object.values(object)
-}
-
-function GetAudioDataFromRowData(RowData) {
-    if (RowData.Pagetype === SFX_PAGETYPE) {
+function GetAudioDataFromRowData(RowData, OptionalStemParentData) {
+    if (RowData.Pagetype == SFX_PAGETYPE) {
         if (LoadedSfxLists.length <= 0) {
             console.warn('No loaded sound effects to loop through.')
             return
@@ -814,8 +745,8 @@ function GetAudioDataFromRowData(RowData) {
         }
     }
     if (
-        RowData.Pagetype === MUSIC_PAGETYPE ||
-        RowData.Pagetype === MUSIC_ALBUM_PAGETYPE
+        RowData.Pagetype == MUSIC_PAGETYPE ||
+        RowData.Pagetype == MUSIC_ALBUM_PAGETYPE
     ) {
         if (LoadedMusicLists.length <= 0) {
             console.warn('No loaded songs to loop through.')
@@ -830,8 +761,8 @@ function GetAudioDataFromRowData(RowData) {
         }
     }
     if (
-        RowData.Pagetype === SFXS_PAGETYPE ||
-        RowData.Pagetype === SFXP_PAGETYPE ||
+        RowData.Pagetype == SFXS_PAGETYPE ||
+        RowData.Pagetype == SFXP_PAGETYPE ||
         RowData.Pagetype == SONGS_PAGETYPE
     ) {
         if (LoadedSfxsList.length <= 0) {
@@ -846,7 +777,7 @@ function GetAudioDataFromRowData(RowData) {
             }
         }
     }
-    if (RowData.Pagetype === SONGS_PAGETYPE) {
+    if (RowData.Pagetype == SONGS_PAGETYPE) {
         if (LoadedSongsList.length <= 0) {
             console.warn('No loaded similar songs to loop through.')
             return
@@ -859,27 +790,241 @@ function GetAudioDataFromRowData(RowData) {
             }
         }
     }
-    if (RowData.Pagetype === SONG_STEMS_PAGETYPE) {
+
+    if (RowData.Pagetype == SONG_STEMS_PAGETYPE) {
         if (LoadedSstemsLists.length <= 0) {
             console.warn('No loaded song stems to loop through.')
             return
         }
         for (const StemData of LoadedSstemsLists) {
-            for (const Stem of StemData.stems) {
-                if (MatchAudioToRow(Stem, RowData, true)) {
-                    const clonedData = cloneref(StemData)
+            for (const Stem of StemData) {
+                if (Stem.id == RowData.StemId) {
+                    const clonedData = cloneref(OptionalStemParentData)
                     clonedData.sitePlayableFilePath = Stem.playableFileUrl
                     clonedData._songName = clonedData.songName
                     clonedData._albumName = clonedData.albumName
-                    clonedData.songName = `${Stem.name} of ${StemData.songName}`
-                    clonedData.albumName = `${Stem.name} of ${StemData.albumName}`
+                    clonedData.songName = `${Stem.name} of ${clonedData._songName}`
                     return clonedData
                 }
             }
         }
     }
 
-    console.warn("Couldn't handle data:", RowData)
+    console.warn("Couldn't find loaded songs for data:", RowData)
+}
+
+function getReactInternal(element) {
+    const goodKey = unsafeWindow.Object.keys(element).find(v =>
+        v.startsWith('__reactFiber')
+    )
+    if (!goodKey) {
+        return
+    }
+    return element[goodKey]
+}
+
+function OnRowAdded(AudioRow, RowData, AudioData) {
+    if (AudioData !== undefined) {
+        WriteAudio(RowData, AudioData)
+    } else {
+        console.warn('No data given for row', RowData)
+        if (RowData.Button !== null) {
+            RowData.Button.style.color = ErrorButtonColor
+        }
+    }
+}
+
+function OnAudioRowAdded(AudioRow) {
+    if (AudioRow.hasAttribute('artlist-dl-processed')) {
+        return
+    }
+    if (AudioRow.classList.contains('hidden')) {
+        return
+    }
+    const RowData = GetAudioRowData(AudioRow, GetPagetype())
+    const AudioData = GetAudioDataFromRowData(RowData)
+
+    OnRowAdded(AudioRow, RowData, AudioData)
+}
+
+function WriteStem(StemData, StemAudioData) {
+    const ChosenColor = ModifiedMusicButtonColor
+    const FileName = MakeFilename(StemAudioData, SONG_STEMS_PAGETYPE)
+    StemData.Button.setAttribute('artlist-dl-processed', 'true')
+    StemData.Button.style.color = ChosenColor
+    StemData.Button.addEventListener(
+        'click',
+        function (event) {
+            event.stopImmediatePropagation() // prevent premium popup upsell
+            ShowSaveFilePickerForURL(
+                StemAudioData.sitePlayableFilePath ||
+                    StemAudioData.playableFileUrl,
+                FileName + '.aac'
+            )
+        },
+        true
+    )
+}
+
+function OnStemRowAdded(StemRow, StemId, HeaderData) {
+    if (StemRow.hasAttribute('artlist-dl-processed')) {
+        return
+    }
+    if (StemRow.classList.contains('hidden')) {
+        return
+    }
+    const StemData = GetAudioRowData(StemRow, SONG_STEMS_PAGETYPE)
+    if (StemData.AudioTitle == '' || StemData.Button == null) {
+        return
+    }
+
+    StemData.StemId = StemId
+
+    const AudioData = GetAudioDataFromRowData(HeaderData)
+    const StemAudioData = GetAudioDataFromRowData(StemData, AudioData)
+
+    StemRow.__artlist_dl_data = { StemData, StemAudioData }
+    WriteStem(StemData, StemAudioData)
+}
+
+function WriteDownloadAllStems(stemsList, DownloadButton) {
+    const SetText = function (text) {
+        DownloadButton.querySelector('span.whitespace-nowrap').innerText = text
+    }
+
+    const ChosenColor = ModifiedMusicButtonColor
+    DownloadButton.setAttribute('artlist-dl-processed', 'true')
+    DownloadButton.style.backgroundColor = ChosenColor
+    DownloadButton.style.borderColor = ChosenColor
+    DownloadButton.style.color = 'black'
+    SetText('Download All Stems')
+
+    DownloadButton.addEventListener(
+        'click',
+        async function (event) {
+            event.stopImmediatePropagation() // prevent dropdown
+            const dataList = []
+            var firstData = null
+
+            DownloadButton.disabled = true
+            SetText('Downloading...')
+
+            try {
+                for (const stem of stemsList) {
+                    if (!firstData) {
+                        firstData = stem.StemAudioData
+                    }
+
+                    dataList.push({
+                        URL:
+                            stem.StemAudioData.sitePlayableFilePath ||
+                            stem.StemAudioData.playableFileUrl,
+                        Filename:
+                            MakeFilename(
+                                stem.StemAudioData,
+                                SONG_STEMS_PAGETYPE
+                            ) + '.aac'
+                    })
+                }
+
+                const fileName = `Music Stems ${firstData.artistName} - ${firstData._songName}${firstData._songName == firstData._albumName ? '' : ` on ${firstData._albumName}.zip`}`
+                await DownloadAndShowSaveFilePickerForURLsZipped(
+                    dataList,
+                    fileName,
+                    function (idx, max) {
+                        SetText(`Downloading (${idx}/${max})...`)
+                    }
+                )
+
+                DownloadButton.disabled = false
+                SetText('Download All Stems')
+            } catch (e) {
+                DownloadButton.disabled = true
+                DownloadButton.style.backgroundColor = ErrorButtonColor
+                DownloadButton.style.borderColor = ErrorButtonColor
+                SetText('Make issue, report error in console')
+                console.error(e)
+                alert(
+                    `Artlist Downloader: please report this in https://github.com/xNasuni/artlist-downloader\n#EWDAS>${String(e)}`
+                )
+                throw e
+            }
+        },
+        true
+    )
+}
+
+function WriteMusicModal(ModalContainer) {
+    for (const Stem of ModalContainer.querySelectorAll(
+        'div[data-testid=song-version-row],div[data-testid=versions-and-stems-modal-header]'
+    )) {
+        if (
+            !Stem.hasAttribute('artlist-dl-processed') &&
+            document.contains(Stem)
+        ) {
+            try {
+                OnAudioRowAdded(Stem)
+                Stem.setAttribute('artlist-dl-processed', 'true')
+            } catch (e) {} // will fail on false positives so just hide errors
+        }
+    }
+
+    const Player = ModalContainer.querySelector('div[data-testid=Player]')
+        ?.children[0]
+    if (Player) {
+        const internal = getReactInternal(Player)
+        const stemsList = []
+        for (
+            var index = 0;
+            index < internal.memoizedProps.children.length;
+            index++
+        ) {
+            const StemRow = Player.children[index]
+            const StemId = internal.memoizedProps.children[index].key
+            if (typeof StemId != 'string') {
+                return
+            }
+
+            const Header = ModalContainer.querySelector(
+                '[data-testid=versions-and-stems-modal-header]'
+            )
+            const HeaderData = GetAudioRowData(Header, GetPagetype())
+
+            OnStemRowAdded(StemRow, StemId, HeaderData)
+            StemRow.setAttribute('artlist-dl-processed', 'true')
+
+            const StemDlData = StemRow.__artlist_dl_data
+            if (!StemDlData) {
+                return
+            }
+
+            stemsList.push({
+                StemAudioData: StemDlData.StemAudioData,
+                StemData: StemDlData.StemData,
+                StemRow,
+                StemId,
+                Header,
+                HeaderData,
+                index
+            })
+        }
+
+        for (const DownloadButton of ModalContainer.querySelectorAll(
+            'button[data-testid=renderButton]'
+        )) {
+            if (
+                !DownloadButton.hasAttribute('artlist-dl-processed') &&
+                DownloadButton.parentNode.getAttribute('data-testid') ==
+                    'download-all-stems-dropdown'
+            ) {
+                WriteDownloadAllStems(stemsList, DownloadButton)
+            }
+        }
+    }
+}
+
+function transformIndexedObject2Array(object) {
+    return Object.values(object)
 }
 
 function HandleJSONData(Data) {
@@ -889,7 +1034,13 @@ function HandleJSONData(Data) {
         return
     }
     if (Datatype === MUSIC_PAGETYPE) {
-        LoadedMusicLists.push(Data.data.songList.songs)
+        const songs = Data.data.songList.songs
+        LoadedMusicLists.push(songs)
+        for (const Song of songs) {
+            if (Song.versions != null) {
+                LoadedMusicLists.push(Song.versions)
+            }
+        }
         return
     }
     if (Datatype === SFXS_PAGETYPE) {
@@ -904,13 +1055,13 @@ function HandleJSONData(Data) {
         LoadedSfxLists.push(Data.data.sfxList.songs)
         return
     }
-    if (
-        Datatype === SONG_STEMS_PAGETYPE &&
-        Data.data.songs &&
-        Data.data.songs[0] &&
-        Data.data.songs[0].stems
-    ) {
-        LoadedSstemsLists.push(Data.data.songs[0])
+    if (Datatype == SONG_STEMS_PAGETYPE) {
+        const songs = Data.data.songs
+        for (const Song of songs) {
+            if (Song.stems != null) {
+                LoadedSstemsLists.push(Song.stems)
+            }
+        }
         return
     }
 
@@ -1125,11 +1276,6 @@ async function Initialize() {
     const Pagetype = GetPagetype()
 
     if (Pagetype === SONGS_PAGETYPE || Pagetype === SFXS_PAGETYPE) {
-        // const Id = location.pathname.split('/')[4]
-        // const NumId = new Number(Id)
-        // if (NumId.toString() !== 'NaN') {
-        //     LoadAssetInfo(NumId)
-        // }
         console.log('searching for banner...')
 
         SongPage = GetSongPage()
@@ -1161,19 +1307,6 @@ async function Initialize() {
         console.log('tbody', TBody)
     }
 
-    function OnAudioRowAdded(AudioRow) {
-        if (AudioRow.getAttribute('artlist-dl-processed') === 'true') {
-            return
-        }
-        if (AudioRow.classList.contains('hidden')) {
-            return
-        }
-        const RowData = GetAudioRowData(AudioRow, GetPagetype())
-        const AudioData = GetAudioDataFromRowData(RowData)
-
-        OnRowAdded(AudioRow, RowData, AudioData)
-    }
-
     console.log('found')
     LastInterval = setInterval(() => {
         if (!TBody) {
@@ -1187,38 +1320,12 @@ async function Initialize() {
                 try {
                     OnAudioRowAdded(AudioRow)
                     AudioRow.setAttribute('artlist-dl-processed', 'true')
-                } catch (e) {
-                    console.warn(e)
-                }
+                } catch (e) {}
             }
         }
 
         for (const modal of document.querySelectorAll('.ReactModal__Content')) {
-            for (const AllStemsDownload of modal.querySelectorAll(
-                'button[data-testid=renderButton]'
-            )) {
-                if (
-                    !AllStemsDownload.hasAttribute('artlist-dl-processed') &&
-                    AllStemsDownload.parentNode.getAttribute('data-testid') ==
-                        'download-all-stems-dropdown'
-                ) {
-                    WriteDownloadAllStems(modal, AllStemsDownload)
-                }
-            }
-            for (const StemContainer of modal.querySelectorAll(
-                'span[data-testid=stems-player-stem-name]'
-            )) {
-                const Stem = StemContainer.parentNode
-                if (
-                    !Stem.hasAttribute('artlist-dl-processed') &&
-                    document.contains(Stem)
-                ) {
-                    try {
-                        OnAudioRowAdded(Stem)
-                        Stem.setAttribute('artlist-dl-processed', 'true')
-                    } catch (e) {} // will fail on false positives so just hide errors
-                }
-            }
+            WriteMusicModal(modal)
         }
     }, 500)
 }
