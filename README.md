@@ -1,10 +1,10 @@
-# artlist-downloader **`v3.2`**
+# artlist-downloader **`v3.3`**
 
 > [!CAUTION]
 > The audio(s) that you download using this are **NOT** allowed for commerical use or for use in YouTube Videos and alike **[without the proper licensing](https://artlist.io/page/pricing/music-and-sfx)**.
 > If you dont want to be held responsible for pirating music/sfx, buy an artlist.io license at [their plans and pricing page](https://artlist.io/page/pricing/max).
 > You should also read their [terms of service](https://artlist.io/help-center/privacy-terms/terms-of-use/) and understand how you are violating them.
-> 
+>
 > I'm personally only using this to listen to the music outside of the website, locally.
 
 > [!WARNING]
@@ -17,8 +17,9 @@
 
 > [!NOTE]
 > In order to install the userscript you need to have a Userscript Manager, these are some I recommend:
-> * **[TamperMonkey Chromium](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo), [TamperMonkey Firefox](https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/) — Personal Choice**
-> * **[OrangeMonkey](https://chromewebstore.google.com/detail/orangemonkey/ekmeppjgajofkpiofbebgcbohbmfldaf)**
+>
+> - **[TamperMonkey Chromium](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo), [TamperMonkey Firefox](https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/) — Personal Choice**
+> - **[OrangeMonkey](https://chromewebstore.google.com/detail/orangemonkey/ekmeppjgajofkpiofbebgcbohbmfldaf)**
 
 ## Extra Information
 

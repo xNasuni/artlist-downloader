@@ -8,7 +8,7 @@
 // @connect     cms-public-artifacts.artlist.io
 // @connect     cms-artifacts.artlist.io
 // @require     https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js
-// @version     3.2
+// @version     3.3
 // @run-at	    document-start
 // @updateURL   https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
 // @downloadURL https://github.com/xNasuni/artlist-downloader/raw/main/artlist-downloader.user.js
@@ -19,6 +19,7 @@ const LoadedMusicLists = []
 const LoadedSfxLists = []
 const LoadedSfxsList = []
 const LoadedSongsList = []
+const LoadedSingleSongList = []
 const LoadedSstemsLists = []
 const ModifiedMusicButtonColor = '#82ff59'
 const ModifiedSfxButtonColor = '#ff90bf'
@@ -762,8 +763,7 @@ function GetAudioDataFromRowData(RowData, OptionalStemParentData) {
     }
     if (
         RowData.Pagetype == SFXS_PAGETYPE ||
-        RowData.Pagetype == SFXP_PAGETYPE ||
-        RowData.Pagetype == SONGS_PAGETYPE
+        RowData.Pagetype == SFXP_PAGETYPE
     ) {
         if (LoadedSfxsList.length <= 0) {
             console.warn('No loaded sfxs to loop through.')
@@ -778,8 +778,8 @@ function GetAudioDataFromRowData(RowData, OptionalStemParentData) {
         }
     }
     if (RowData.Pagetype == SONGS_PAGETYPE) {
-        if (LoadedSongsList.length <= 0) {
-            console.warn('No loaded similar songs to loop through.')
+        if (LoadedSongsList.length <= 0 && LoadedSingleSongList.length <= 0) {
+            console.warn('No loaded songs to loop through.')
             return
         }
         for (const SongsList of LoadedSongsList) {
@@ -787,6 +787,11 @@ function GetAudioDataFromRowData(RowData, OptionalStemParentData) {
                 if (MatchAudioToRow(SongData, RowData)) {
                     return SongData
                 }
+            }
+        }
+        for (const SongData of LoadedSingleSongList) {
+            if (MatchAudioToRow(SongData, RowData)) {
+                return SongData
             }
         }
     }
@@ -810,7 +815,12 @@ function GetAudioDataFromRowData(RowData, OptionalStemParentData) {
         }
     }
 
-    console.warn("Couldn't find loaded songs for data:", RowData)
+    console.warn(
+        "Couldn't find loaded songs for data:",
+        RowData,
+        'pagetype:',
+        RowData.Pagetype
+    )
 }
 
 function getReactInternal(element) {
@@ -1030,6 +1040,7 @@ function transformIndexedObject2Array(object) {
 function HandleJSONData(Data) {
     const Datatype = GetDatatype(Data)
     if (Datatype === SONGS_PAGETYPE) {
+        LoadedSingleSongList.push(Data.data.songs[0])
         LoadedSongsList.push(Data.data.songs[0].similarSongs)
         return
     }
@@ -1203,8 +1214,27 @@ function HandleListRSC(responseText) {
     }
 }
 
+const SINGLE_SONG_REQUEST_STRING =
+    '\nquery Songs($ids: [String!]!) {\n  songs(ids: $ids) {\n    songName\n    similarSongs {\n      \nalbumThumbFilePath\nalbumImageFilePath\nalbumId\nalbumName\nalbumNameForURL\nartistId\nartistName\nduration\ndurationTime\nexplicit\nfeaturedArtists\nisOriginal\nisNew\nlyrics\nnameForURL\noriginalVersionID\nprimaryArtists\nassetTypeId\nsitePlayableFilePath\nsongName\nsongId\nwaveSurferFilePath\nnumberOfStems\nisPreRelease\nofficialReleaseDate\ngenreCategories {\n  id\n  name\n  parentName\n}\nhook30End\nhook30Start\n\n    }\n  }\n}\n'
+const SINGLE_SONG_EXPANDED_REQUEST_STRING =
+    '\nquery Songs($ids: [String!]!) {\n  songs(ids: $ids) {\n    songId\n    songName\n    artistId\n    artistName\n    albumId\n    albumName\n    assetTypeId\n    duration\n    sitePlayableFilePath\n    similarSongs {\n      \nalbumThumbFilePath\nalbumImageFilePath\nalbumId\nalbumName\nalbumNameForURL\nartistId\nartistName\nduration\ndurationTime\nexplicit\nfeaturedArtists\nisOriginal\nisNew\nlyrics\nnameForURL\noriginalVersionID\nprimaryArtists\nassetTypeId\nsitePlayableFilePath\nsongName\nsongId\nwaveSurferFilePath\nnumberOfStems\nisPreRelease\nofficialReleaseDate\ngenreCategories {\n  id\n  name\n  parentName\n}\nhook30End\nhook30Start\n\n    }\n  }\n}\n'
 function ApplyXHR(XHR, Datatype) {
     if (Datatype !== UNKNOWN_DATATYPE) {
+        const oSend = XHR.send
+        XHR.send = function (body) {
+            try {
+                const data = JSON.parse(body)
+                if (data.query == SINGLE_SONG_REQUEST_STRING) {
+                    data.query = SINGLE_SONG_EXPANDED_REQUEST_STRING
+                    body = JSON.stringify(data)
+                    console.log('expanded string')
+                }
+            } catch (e) {
+                //let that sink in
+            }
+
+            oSend.apply(this, arguments)
+        }
         XHR.addEventListener('readystatechange', function () {
             if (XHR.readyState == XMLHttpRequest.DONE) {
                 if (Datatype == NEXTRSC_DATATYPE) {
@@ -1261,7 +1291,7 @@ function HookRequests() {
     })
 }
 
-// this makes the user-script support the [←] Back and [→] Right navigations
+// this makes the user-script support the [←] Backwards and [→] Forwards navigations
 // aswell as switching pages because artlist doesn't navigate, but instead
 // changes their HTML dynamically so that the end-user does not have to
 // reload the entire page.
